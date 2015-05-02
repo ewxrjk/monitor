@@ -574,17 +574,27 @@ static const struct line *file_line(const struct file *f, size_t line) {
 
 /* Append data to a line */
 static void line_append(struct line *l, const char *s, size_t n) {
-  /* TODO special handling for tabs */
-  assert(l);
-  if(n > l->space - l->len) {
-    l->space = l->space ? 2 * l->space : 16;
-    while(l->space && n > l->space - l->len)
-      l->space *= 2;
-    if(!l->space || !(l->bytes = realloc(l->bytes, l->space)))
-      fatal(errno, "realloc");
+  if(n) {
+    /* Expand tabs */
+    const char *tab;
+    if((tab = memchr(s, '\t', n))) {
+      static const char spaces[8] = "        ";
+      line_append(l, s, tab - s);
+      line_append(l, spaces, 8 - (l->len % 8));
+      line_append(l, tab + 1, (s + n - (tab + 1)));
+      return;
+    }
+    assert(l);
+    if(n > l->space - l->len) {
+      l->space = l->space ? 2 * l->space : 16;
+      while(l->space && n > l->space - l->len)
+        l->space *= 2;
+      if(!l->space || !(l->bytes = realloc(l->bytes, l->space)))
+        fatal(errno, "realloc");
+    }
+    memcpy(l->bytes + l->len, s, n);
+    l->len += n;
   }
-  memcpy(l->bytes + l->len, s, n);
-  l->len += n;
 }
 
 /* Free a line */
