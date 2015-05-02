@@ -1,0 +1,110 @@
+.\" This file is part of monitor.
+.\" Copyright (C) 2015 Richard Kettlewell
+.\"
+.\" This program is free software; you can redistribute it and/or modify
+.\" it under the terms of the GNU General Public License as published by
+.\" the Free Software Foundation; either version 3 of the License, or
+.\" (at your option) any later version.
+.\"
+.\" This program is distributed in the hope that it will be useful, but
+.\" WITHOUT ANY WARRANTY; without even the implied warranty of
+.\" MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+.\" General Public License for more details.
+.\"
+.\" You should have received a copy of the GNU General Public License
+.\" along with this program; if not, write to the Free Software
+.\" Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
+.\" USA
+.TH monitor 1
+.SH NAME
+monitor \- monitor output of a repeated command
+.SH SYNOPSIS
+\fBmonitor\fR [\fIOPTIONS\fR] [\fB--\fR] \fICOMMAND\fR [\fIARGS..\fR]
+.SH DESCRIPTION
+\fBmonitor\fR repeatedly runs a command and displays its output.
+.SH OPTIONS
+.TP
+.B -h\fR, \fB--highlight
+Highlight changed lines in the output.
+.TP
+.B -n\fR, \fB--interval\fI SECONDS
+The interval between each run of the command.
+Fractional intervals are allowed.
+The default is 1 second.
+.TP
+.B -s\fR, \fB--shell
+Use the shell to run the command.
+See the notes below for discussion.
+.TP
+.B --help
+Display a usage message.
+.TP
+.B --version
+Display a version string.
+.SH KEYBOARD
+The following keys can be used to control \fBmonitor\fR:
+.TP
+.B Q
+Quit.
+.TP
+.B left arrow\fR, \fB^B
+Pan the viewport left.
+.TP
+.B right arrow, \fB^F
+Pan the viewport right.
+.TP
+.B \fB^A
+Pan the viewport all the way to the left.
+.TP
+.B up arrow, \fB^P
+Scroll the viewport up.
+.TP
+.B down arrow, \fB^N
+Scroll the viewport down.
+.TP
+.B page up
+Scroll the viewport up a whole page.
+.TP
+.B page down
+Scroll the viewport down a whole page.
+.TP
+.B home
+Pan/scroll the viewport all the way to the top left.
+.TP
+.B ^L
+Repaint the screen (if it has become corrupted).
+.SH EXAMPLES
+Permanently monitor filesystem usage:
+.in +4n
+.nf
+
+monitor df \-k
+
+.fi
+.in
+Monitor the evolution of directory usage (for instance, when restoring
+a backup):
+.in +4n
+.nf
+
+monitor \-\-highlight \-\-shell 'du \-kx | sort \-nr'
+
+.fi
+.in
+.SH NOTE
+The default behavior is to avoid use of the shell, making
+\fBmonitor\fR an \*(lqadverbial\*(rq command with the same syntax as
+\fBnice\fR(1), \fBnohup\fR(1) etc.
+The \fB--shell\fR option changes this, concanenating all the arguments
+and passing them to the shell.
+.SH ENVIRONMENT
+.TP
+.B SHELL
+The \fB--shell\fR option will use this as the shell.
+If it is not set then it will search the path for \fBsh\fR.
+.SH BUGS
+Non-ASCII input is broken.
+.PP
+The \fB--highlight\fR option doesn't know about insertions (or deletions).
+.SH "SEE ALSO"
+\fBwatch\fR(1)

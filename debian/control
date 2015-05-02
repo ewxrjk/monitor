@@ -1,0 +1,15 @@
+Source: monitor
+Section: utils
+Priority: optional
+Maintainer: Richard Kettlewell <rjk@greenend.org.uk>
+Standards-Version: 3.9.2
+Homepage: https://github.com/ewxrjk/monitor
+Build-Depends: libncurses5-dev
+
+Package: monitor
+Architecture: any
+Depends: ${misc:Depends},${shlibs:Depends}
+Description: Monitor the output of a repeated command
+ This program runs a command repeatedly, constantly displaying the
+ output.  Cursor keys may be used to pan and scroll the output.
+ Changed lines may be highlighted.
