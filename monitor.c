@@ -56,7 +56,8 @@ static int highlight_changes;
 struct line {
   size_t space;                 /* space in bytes[] */
   size_t len;                   /* how much of bytes[] actually used */
-  char *bytes;                  /* content of line (including \n) */
+  char *bytes;                  /* content of line (not including \n) */
+  int terminated;               /* true if this line is finished */
 };
 
 /* An entire file, read from a subprocess */
@@ -453,8 +454,6 @@ static void render(struct state *s) {
       str = cl->bytes + s->xo;
       n = cl->len - s->xo;
     }
-    if(n > 0 && str[n-1] == '\n')
-      --n;
     if(n > (unsigned)width)
       n = width;
     if(n)
@@ -537,9 +536,7 @@ static void file_append(struct file *f, const char *s, size_t n) {
   assert(f);
   while(n > 0) {
     if(f->nlines == 0
-     || (f->nlines > 0
-         && f->lines[f->nlines-1].len > 0
-         && f->lines[f->nlines-1].bytes[f->lines[f->nlines-1].len-1] == '\n')) {
+     || f->lines[f->nlines-1].terminated) {
       if(f->nlines == f->nslots) {
         f->nslots = f->nslots ? 2 * f->nslots : 32;
         if(!f->nslots || !(f->lines = realloc(f->lines,
@@ -550,12 +547,17 @@ static void file_append(struct file *f, const char *s, size_t n) {
       ++f->nlines;
     }
     if((e = memchr(s, '\n', n)))
-      l = (e - s) + 1;
+      l = e - s;
     else
       l = n;
     line_append(&f->lines[f->nlines-1], s, l);
     n -= l;
     s += l;
+    if(n > 0 && *s == '\n') {
+      f->lines[f->nlines-1].terminated = 1;
+      --n;
+      ++s;
+    }
   }
 }
 
