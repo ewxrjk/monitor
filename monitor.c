@@ -170,20 +170,22 @@ int main(int argc, char **argv) {
   }
   setup_signals();
   if(shell) {
-    struct line l;
-    static const char *cmd[4];
-    memset(&l, 0, sizeof l);
+    char *shell_command, *s;
+    size_t len = 0;
+    const char *cmd[4];
+    for(n = optind; n < argc; ++n)
+      len += strlen(argv[n]) + 1;
+    if(!(s = shell_command = malloc(len)))
+      fatal(errno, "malloc");
     for(n = optind; n < argc; ++n) {
-      if(n != optind)
-        line_append(&l, " ", 1);
-      line_append(&l, argv[n], strlen(argv[n]));
+      *s += ' ';
+      s += strlen(strcpy(s, argv[n]));
     }
-    line_append(&l, "", 1);
     cmd[0] = getenv("SHELL");
     if(!cmd[0])
       cmd[0] = "sh";
     cmd[1] = "-c";
-    cmd[2] = l.bytes;
+    cmd[2] = shell_command;
     cmd[3] = NULL;
     monitor(cmd, interval);
   } else
