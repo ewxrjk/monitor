@@ -17,23 +17,25 @@
  * USA
  */
 #include <config.h>
-#include <assert.h>
+#include <cassert>
 #include <curses.h>
-#include <errno.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <getopt.h>
-#include <locale.h>
-#include <math.h>
+#include <clocale>
+#include <cmath>
 #include <paths.h>
 #include <poll.h>
-#include <signal.h>
-#include <stdlib.h>
-#include <string.h>
+#include <csignal>
+#include <cstdlib>
+#include <cstring>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <time.h>
+#include <ctime>
 #include <unistd.h>
+#include <string>
+#include <vector>
 
 #define ESCBIT (KEY_MAX+1)
 
@@ -52,20 +54,106 @@ static sigset_t sigoldmask;
 /* True to highlight changes */
 static int highlight_changes;
 
+static void help(FILE *fp);
+static void monitor(const char **cmd, double interval);
+static void setup_signals(void);
+static void process_signals(struct state *s);
+static void reset_signals(void);
+static void discard(int whatever);
+static void sighandler(int sig);
+static void setup_curses(void);
+static void teardown_curses(void);
+static void mainloop(const char **cmd, double interval);
+static void reinvoke(struct state *s, const char **cmd, double interval);
+static void invoke(struct state *s, const char **cmd);
+static void process_input(struct state *s);
+static void process_keyboard(struct state *s);
+static void process_key(struct state *state, int ch);
+static void render(struct state *state);
+static void pad_line(int y, int x, size_t n);
+static double now(clockid_t c);
+static void fatal(int errno_value, const char *fmt, ...);
+
 /* A record of a line in a file */
 struct line {
-  size_t space;                 /* space in bytes[] */
-  size_t len;                   /* how much of bytes[] actually used */
-  char *bytes;                  /* content of line (not including \n) */
-  int terminated;               /* true if this line is finished */
+  line(): terminated(false) {
+  }
+  std::string bytes;            // contents of this line
+  bool terminated;              // true if this line is finished
+
+  const char *data() const { return bytes.data(); }
+  size_t size() const { return bytes.size(); }
+  
+  void append(const char *s, size_t n) {
+    if(n) {
+      /* Expand tabs */
+      const char *tab;
+      if((tab = static_cast<const char *>(memchr(s, '\t', n)))) {
+        static const char spaces[] = "        ";
+        append(s, tab - s);
+        append(spaces, 8 - (bytes.size() % 8));
+        append(tab + 1, (s + n - (tab + 1)));
+        return;
+      }
+      bytes.append(s, n);
+    }
+  }
+
+  bool operator!=(const line &that) const {
+    return bytes != that.bytes;
+  }
 };
 
 /* An entire file, read from a subprocess */
 struct file {
-  double expires;               /* when this file expires */
-  size_t nslots;                /* number of available entries in lines[] */
-  size_t nlines;                /* number of used entries in lines[] */
-  struct line *lines;           /* content of file (so far) */
+  /* Create a file with a given expiry interval */
+  file(double interval) : expires(now(CLOCK_MONOTONIC) + interval) {
+  }
+
+  double expires;               // when this file expires
+  std::vector<line> lines;      // contents of file
+
+  /* Find a line */
+  line &at(size_t index) {
+    static line dummy;
+    if(index < lines.size())
+      return lines.at(index);
+    else
+      return dummy;
+  }
+
+  /* Find the last line */
+  line &last() {
+    return lines.at(lines.size()-1);
+  }
+
+  /* Append data */
+  void append(const char *s, size_t n) {
+    size_t l;
+    const char *e;
+
+    while(n > 0) {
+      if(lines.size() == 0 || last().terminated)
+        lines.push_back(line());
+      if(*s == '\n') {
+        last().terminated = true;
+        l = 1;
+      } else {
+        if((e = static_cast<const char *>(memchr(s, '\n', n))))
+          l = e - s;
+        else
+          l = n;
+        last().append(s, l);
+      }
+      s += l;
+      n -= l;
+    }
+  }
+
+  /* Return true if this file is out of date */
+  bool out_of_date() const {
+    return now(CLOCK_MONOTONIC) >= expires;
+  }
 };
 
 /* State of the event loop */
@@ -85,34 +173,6 @@ struct state {
 
 /* Signals handled through the pipe */
 static const int signals[] = { SIGCHLD, SIGWINCH };
-
-static void help(FILE *fp);
-static void monitor(const char **cmd, double interval);
-static void setup_signals(void);
-static void process_signals(struct state *s);
-static void reset_signals(void);
-static void discard(int whatever);
-static void sighandler(int sig);
-static void setup_curses(void);
-static void teardown_curses(void);
-static void mainloop(const char **cmd, double interval);
-static void reinvoke(struct state *s, const char **cmd, double interval);
-static void invoke(struct state *s, const char **cmd);
-static void process_input(struct state *s);
-static void process_keyboard(struct state *s);
-static void process_key(struct state *state, int ch);
-static void render(struct state *state);
-static void pad_line(int y, int x, size_t n);
-static struct file *file_new(double interval);
-static void file_free(struct file *f);
-static void file_append(struct file *f, const char *s, size_t n);
-static int file_out_of_date(const struct file *f);
-static const struct line *file_line(const struct file *f, size_t line);
-static void line_append(struct line *l, const char *s, size_t n);
-static void line_free(struct line *l);
-static int line_equal(const struct line *a, const struct line *b);
-static double now(clockid_t c);
-static void fatal(int errno_value, const char *fmt, ...);
 
 enum {
   OPT_HELP = 256,
@@ -171,22 +231,17 @@ int main(int argc, char **argv) {
   }
   setup_signals();
   if(shell) {
-    char *shell_command, *s;
-    size_t len = 0;
+    std::string shell_command;
     const char *cmd[4];
-    for(n = optind; n < argc; ++n)
-      len += strlen(argv[n]) + 1;
-    if(!(s = shell_command = malloc(len)))
-      fatal(errno, "malloc");
     for(n = optind; n < argc; ++n) {
-      *s += ' ';
-      s += strlen(strcpy(s, argv[n]));
+      shell_command += ' ';
+      shell_command += argv[n];
     }
     cmd[0] = getenv("SHELL");
     if(!cmd[0])
       cmd[0] = "sh";
     cmd[1] = "-c";
-    cmd[2] = shell_command;
+    cmd[2] = shell_command.c_str();
     cmd[3] = NULL;
     monitor(cmd, interval);
   } else
@@ -230,7 +285,7 @@ static void mainloop(const char **cmd, double interval) {
   s->status = -1;
   while(!s->done) {
     /* Start a new subprocess if the old output has gone stale */
-    if(file_out_of_date(s->current))
+    if(!s->current || s->current->out_of_date())
       reinvoke(s, cmd, interval);
     assert(s->current);
     /* File descriptors to monitor */
@@ -270,19 +325,19 @@ static void mainloop(const char **cmd, double interval) {
     if(s->render)
       render(s);
   }
-  file_free(s->current);
-  file_free(s->previous);
+  delete s->current;
+  delete s->previous;
 }
 
 /* Command invocation ------------------------------------------------------ */
 
 /* Invoke the command and prepare to capture its output */
 static void reinvoke(struct state *s, const char **cmd, double interval) {
-  file_free(s->previous);
+  delete s->previous;
   if(s->fd >= 0)
     close(s->fd);
   s->previous = s->current;
-  s->current = file_new(interval);
+  s->current = new file(interval);
   invoke(s, cmd);
 }
 
@@ -326,7 +381,7 @@ static void process_input(struct state *s) {
   int n;
   assert(s->fd >= 0);
   while((n = read(s->fd, buffer, sizeof buffer)) > 0) {
-    file_append(s->current, buffer, n);
+    s->current->append(buffer, n);
     s->render = 1;
   }
   if(n < 0) {
@@ -439,20 +494,19 @@ static void render(struct state *s) {
     // TODO the diff algorithm here is very primitive - any differing
     // lines are highlighted.  This handles insertions and deletions
     // very badly.  Sub-line diff handling would also be nice.
-    const struct line *pl = file_line(s->previous ? s->previous : s->current,
-                                      s->yo + y);
-    const struct line *cl = file_line(s->current, s->yo + y);
-    if(highlight_changes && !line_equal(pl, cl))
+    const line &pl = (s->previous ? s->previous : s->current)->at(s->yo + y);
+    const line &cl = s->current->at(s->yo + y);
+    if(highlight_changes && pl != cl)
       attron(A_REVERSE);
     else
       attroff(A_REVERSE);
     // TODO this is junk for non-ASCII input.
-    if(s->xo > cl->len) {
-      str = cl->bytes;
+    if(s->xo > cl.size()) {
+      str = cl.data();
       n = 0;
     } else {
-      str = cl->bytes + s->xo;
-      n = cl->len - s->xo;
+      str = cl.data() + s->xo;
+      n = cl.size() - s->xo;
     }
     if(n > (unsigned)width)
       n = width;
@@ -494,130 +548,14 @@ static void render(struct state *s) {
 
 /* Write n spaces at (y,x) */
 static void pad_line(int y, int x, size_t n) {
-  static const char padding[8] = "        ";
+  static const char padding[] = "        ";
   while(n > 0) {
-    size_t this_time = n > sizeof padding ? sizeof padding : n;
+    size_t this_time = n > strlen(padding) ? strlen(padding) : n;
     if(mvinsnstr(y, x, padding, this_time) == ERR)
       fatal(0, "mvinsnstr failed (y=%d x=%d n=%zu)", y, x, this_time);
     x += this_time;
     n -= this_time;
   }
-}
-
-/* File contents handling -------------------------------------------------- */
-
-/* Create a new file */
-static struct file *file_new(double interval) {
-  struct file *f = calloc(sizeof *f, 1);
-  if(!f)
-    fatal(errno, "calloc");
-  f->expires = now(CLOCK_MONOTONIC) + interval;
-  return f;
-}
-
-/* Destroy a file */
-static void file_free(struct file *f) {
-  if(f) {
-    size_t n = 0;
-    for(n = 0; n < f->nlines; ++n)
-      line_free(&f->lines[n]);
-    free(f->lines);
-    f->nslots = 0;
-    f->nlines = 0;
-    f->lines = 0;
-    free(f);
-  }
-}
-
-/* Append some data to a file */
-static void file_append(struct file *f, const char *s, size_t n) {
-  char *e;
-  size_t l;
-  assert(f);
-  while(n > 0) {
-    if(f->nlines == 0
-     || f->lines[f->nlines-1].terminated) {
-      if(f->nlines == f->nslots) {
-        f->nslots = f->nslots ? 2 * f->nslots : 32;
-        if(!f->nslots || !(f->lines = realloc(f->lines,
-                                              f->nslots * sizeof(*f->lines))))
-          fatal(errno, "realloc");
-      }
-      memset(&f->lines[f->nlines], 0, sizeof f->lines[f->nlines]);
-      ++f->nlines;
-    }
-    if((e = memchr(s, '\n', n)))
-      l = e - s;
-    else
-      l = n;
-    line_append(&f->lines[f->nlines-1], s, l);
-    n -= l;
-    s += l;
-    if(n > 0 && *s == '\n') {
-      f->lines[f->nlines-1].terminated = 1;
-      --n;
-      ++s;
-    }
-  }
-}
-
-/* Return nonzero if a file is out of date */
-static int file_out_of_date(const struct file *f) {
-  return f == NULL || now(CLOCK_MONOTONIC) >= f->expires;
-}
-
-/* Find a line in a file */
-static const struct line *file_line(const struct file *f, size_t line) {
-  static struct line dummy_line;
-  assert(f);
-  if(line < f->nlines)
-    return &f->lines[line];
-  else
-    return &dummy_line;
-}
-
-/* Append data to a line */
-static void line_append(struct line *l, const char *s, size_t n) {
-  if(n) {
-    /* Expand tabs */
-    const char *tab;
-    if((tab = memchr(s, '\t', n))) {
-      static const char spaces[8] = "        ";
-      line_append(l, s, tab - s);
-      line_append(l, spaces, 8 - (l->len % 8));
-      line_append(l, tab + 1, (s + n - (tab + 1)));
-      return;
-    }
-    assert(l);
-    if(n > l->space - l->len) {
-      l->space = l->space ? 2 * l->space : 16;
-      while(l->space && n > l->space - l->len)
-        l->space *= 2;
-      if(!l->space || !(l->bytes = realloc(l->bytes, l->space)))
-        fatal(errno, "realloc");
-    }
-    memcpy(l->bytes + l->len, s, n);
-    l->len += n;
-  }
-}
-
-/* Free a line */
-static void line_free(struct line *l) {
-  assert(l);
-  free(l->bytes);
-  l->space = 0;
-  l->len = 0;
-  l->bytes = 0;
-}
-
-/* Return nonzero if two lines are equal */
-static int line_equal(const struct line *a, const struct line *b) {
-  assert(a);
-  assert(b);
-  if(a->len == b->len)
-    return !memcmp(a->bytes, b->bytes, a->len);
-  else
-    return 0;
 }
 
 /* Signal handling --------------------------------------------------------- */

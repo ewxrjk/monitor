@@ -20,10 +20,10 @@ AC_INIT([monitor], [0.0], [rjk@greenend.org.uk])
 AC_CONFIG_AUX_DIR([config.aux])
 AM_INIT_AUTOMAKE([foreign])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES])
-AC_CONFIG_SRCDIR([monitor.c])
+AC_CONFIG_SRCDIR([monitor.cc])
 AM_CONFIG_HEADER([config.h])
-AC_LANG([C])
-AC_PROG_CC
+AC_LANG([C++])
+AC_PROG_CXX
 AC_SET_MAKE
 AC_CHECK_LIB([ncurses],[initscr],[LIBCURSES=-lncurses])
 AC_CHECK_LIB([rt],[clock_gettime])
@@ -31,22 +31,22 @@ AC_SUBST([LIBCURSES])
 AC_CHECK_LIB([m],[floor],[LIBM=-lm])
 AC_SUBST([LIBM])
 AC_DEFINE([_GNU_SOURCE], [1], [use GNU extensions])
-if test "x$GCC" = xyes; then
+if test "x$GXX" = xyes; then
   werror="-Werror"
   coverage="-fprofile-arcs -ftest-coverage"
-  CC="$CC -Wall -W -Wpointer-arith -Wwrite-strings -Wmissing-prototypes -Wmissing-declarations -Wnested-externs -Wshadow"
+  CXX="$CXX -Wall -W -Wpointer-arith -Wwrite-strings -Wmissing-declarations -Wshadow"
 fi
 
 AC_ARG_ENABLE([werror],[AS_HELP_STRING([--disable-werror],[don't use -Werror])],
               [],[enable_werror=yes])
 if test "$enable_werror" = yes; then
-  CC="$CC $werror"
+  CXX="$CXX $werror"
 fi
 
 AC_ARG_ENABLE([coverage],[AS_HELP_STRING([--enable-coverage],
                                          [compile with coverage information])])
 if test "$enable_coverage" = yes; then
-  CC="${CC} ${coverage}"
+  CX="${CXX} ${coverage}"
 fi
 
 AH_BOTTOM([#ifdef __GNUC__

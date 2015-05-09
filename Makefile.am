@@ -16,6 +16,7 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
 # USA
 bin_PROGRAMS=monitor
+monitor_SOURCES=monitor.cc
 monitor_LDADD=$(LIBCURSES) $(LIBM)
 man_MANS=monitor.1
 EXTRA_DIST=debian/changelog debian/compat debian/control	\
