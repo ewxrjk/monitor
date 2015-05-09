@@ -18,23 +18,25 @@
  */
 #include <config.h>
 #include <cassert>
-#include <curses.h>
 #include <cerrno>
-#include <fcntl.h>
-#include <getopt.h>
 #include <clocale>
 #include <cmath>
-#include <paths.h>
-#include <poll.h>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <curses.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <iconv.h>
+#include <langinfo.h>
+#include <paths.h>
+#include <poll.h>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <ctime>
 #include <unistd.h>
-#include <string>
 #include <vector>
 
 #define ESCBIT (KEY_MAX+1)
@@ -76,27 +78,123 @@ static void fatal(int errno_value, const char *fmt, ...);
 
 /* A record of a line in a file */
 struct line {
-  line(): terminated(false) {
+  line(): terminated(false),
+          have_cchars(false) {
   }
   std::string bytes;            // contents of this line
+  std::vector<cchar_t> cchars;  // cchar_t representation
   bool terminated;              // true if this line is finished
+  bool have_cchars;             // true if cchars is valid
 
   const char *data() const { return bytes.data(); }
   size_t size() const { return bytes.size(); }
-  
+
   void append(const char *s, size_t n) {
     if(n) {
-      /* Expand tabs */
-      const char *tab;
-      if((tab = static_cast<const char *>(memchr(s, '\t', n)))) {
-        static const char spaces[] = "        ";
-        append(s, tab - s);
-        append(spaces, 8 - (bytes.size() % 8));
-        append(tab + 1, (s + n - (tab + 1)));
-        return;
-      }
       bytes.append(s, n);
+      have_cchars = false;
     }
+  }
+
+  const std::vector<cchar_t> &get_cchars() {
+    if(!have_cchars) {
+      // Keep an iconv handle around indefinitely
+      static iconv_t cd = (iconv_t)-1;
+      if(cd == (iconv_t)-1)
+        if((cd = iconv_open("WCHAR_T", nl_langinfo(CODESET))) == (iconv_t)-1)
+          fatal(errno, "iconv_open");
+      assert(sizeof(wchar_t) == 4); // sanity check
+      std::wstring wchars;
+      char *in = (char *)bytes.data();
+      size_t inleft = bytes.size();
+      while(inleft > 0) {
+        wchar_t words[128];
+        char *out = (char *)&words[0];
+        size_t outleft = sizeof words;
+        size_t rc = iconv(cd, &in, &inleft, &out, &outleft);
+        wchars.append(words, ((sizeof words) - outleft) / sizeof(wchar_t));
+        if(rc == (size_t)-1) {
+          size_t escape;
+          switch(errno) {
+          case EILSEQ:          // invalid sequence
+            escape = 1;         // escape one byte and pick up after that
+            break;
+          case EINVAL:          // incomplete sequence
+            escape = inleft;    // escape the whole sequence
+            break;
+          case E2BIG:           // words[] not big enough
+            escape = 0;         // come back round next time
+            break;
+          default:
+            fatal(errno, "iconv");
+          }
+          // Use C-like octal escapes for anything that could not be converted
+          assert(inleft > escape);
+          while(escape > 0) {
+            swprintf(words, sizeof words / sizeof *words,
+                     L"\\%03o", (unsigned char)*in);
+            wchars.append(words);
+            ++in;
+            --inleft;
+          }
+        }
+      }
+      cchars.clear();
+      size_t pos = 0, limit = wchars.size(), column = 0;
+      while(pos < limit) {
+        wchar_t chars[CCHARW_MAX+1];
+        cchar_t cc;
+        size_t n = 0;
+        wchar_t wch = wchars[pos];
+        if(wch == L'\t') { // Expand tabs
+          static int tabsize;
+          if(!tabsize) {
+            const char *e = getenv("TABSIZE");
+            if(!e || (tabsize = atoi(e)) <= 0)
+              tabsize = 8;
+          }
+          chars[0] = L' ';
+          chars[1] = 0;
+          if(setcchar(&cc, chars, 0/*TODO*/, 0, NULL) == ERR)
+            fatal(0, "setcchar failed");
+          do {
+            cchars.push_back(cc);
+            ++column;
+          } while(column % tabsize != 0);
+          ++pos;
+          continue;
+        }
+        const int char_width = wcwidth(wch);
+        if(char_width == -1) { // Control character.  TODO \o would be better?
+          chars[n++] = wchars[pos++];
+          column += 1;
+        } else {
+          if(char_width == 0) {
+            // Starts with a nonspacing character.  Bodge something up...
+            chars[n++] = L' ';
+            column += 1;
+          } else {
+            chars[n++] = wchars[pos++];
+            column += char_width;
+          }
+          while(pos < limit && wcwidth(wchars[pos]) == 0) {
+            // Combining character sequences that are too long are
+            // simply truncated.
+            // TODO converting to NFC (if not already there) would provide
+            // a bit more room.
+            if(n < CCHARW_MAX)
+              chars[n++] = wchars[pos];
+            ++pos;
+          }
+        }
+        chars[n] = 0;
+        if(setcchar(&cc, chars, 0/*TODO*/, 0, NULL) == ERR)
+          fatal(0, "setcchar failed");
+        cchars.push_back(cc);
+        assert(pos > 0);
+      }
+    }
+    return cchars;
   }
 
   bool operator!=(const line &that) const {
@@ -474,7 +572,6 @@ static void process_key(struct state *s, int ch) {
 /* Redraw the display */
 static void render(struct state *s) {
   int width, height, y;
-  const char *str;
   size_t n;
   char footer[128];
   char sbuf[128];
@@ -494,26 +591,36 @@ static void render(struct state *s) {
     // TODO the diff algorithm here is very primitive - any differing
     // lines are highlighted.  This handles insertions and deletions
     // very badly.  Sub-line diff handling would also be nice.
-    const line &pl = (s->previous ? s->previous : s->current)->at(s->yo + y);
-    const line &cl = s->current->at(s->yo + y);
+    line &pl = (s->previous ? s->previous : s->current)->at(s->yo + y);
+    line &cl = s->current->at(s->yo + y);
     if(highlight_changes && pl != cl)
       attron(A_REVERSE);
     else
       attroff(A_REVERSE);
-    // TODO this is junk for non-ASCII input.
-    if(s->xo > cl.size()) {
-      str = cl.data();
-      n = 0;
-    } else {
-      str = cl.data() + s->xo;
-      n = cl.size() - s->xo;
+    // Prefill with blanks
+    pad_line(y, 0, width);
+    const std::vector<cchar_t> &cchars = cl.get_cchars();
+    size_t pos = 0, limit = cchars.size(), column = 0;
+    while(pos < limit) {
+      wchar_t wchars[CCHARW_MAX+1];
+      attr_t attrs;
+      short color_pair;
+      if(getcchar(&cchars[pos], wchars, &attrs, &color_pair, NULL) == ERR)
+        fatal(0, "getcchar failed");
+      int char_width = wcwidth(wchars[0]);
+      if(char_width < 0)
+        char_width = 1;         // TODO blech
+      if(column >= s->xo) {
+        int x = column - s->xo;
+        if(x < width) {
+          if(mvadd_wch(y, x, &cchars[pos]) == ERR)
+            fatal(0, "mvins_wch failed (y=%d x=%d)", y, x);
+        } else
+          break;
+      }
+      column += char_width;
+      ++pos;
     }
-    if(n > (unsigned)width)
-      n = width;
-    if(n)
-      if(mvinsnstr(y, 0, str, n) == ERR)
-        fatal(0, "mvinsnstr failed (y=%d n=%zu)", y, n);
-    pad_line(y, n, width - n);
   }
   attron(A_REVERSE);
   time(&t);
