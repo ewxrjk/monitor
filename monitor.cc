@@ -628,8 +628,10 @@ static void render(struct state *s) {
   if(line_numbers) {
     line_digits = 1 + floor(log10(1 + s->current->size()));
     left_margin = line_digits + 1;
-  } else
+  } else {
+    line_digits = 0;            // quieten compiler
     left_margin = 0;
+  }
   for(y = 0; y < height - 1; ++y) {
     // TODO the diff algorithm here is very primitive - any differing
     // lines are highlighted.  This handles insertions and deletions
