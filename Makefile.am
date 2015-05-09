@@ -17,8 +17,8 @@
 # USA
 bin_PROGRAMS=monitor
 monitor_SOURCES=monitor.cc
-monitor_CPPFLAGS=$(ncursesw_CFLAGS) -D_XOPEN_SOURCE_EXTENDED
-monitor_LDADD=$(ncursesw_LIBS) $(LIBM)
+monitor_CPPFLAGS=$(ncurses_CFLAGS) -D_XOPEN_SOURCE_EXTENDED
+monitor_LDADD=$(ncurses_LIBS) $(LIBM)
 man_MANS=monitor.1
 EXTRA_DIST=debian/changelog debian/compat debian/control	\
 debian/copyright debian/rules debian/source/format README.md	\

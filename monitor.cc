@@ -41,6 +41,12 @@
 
 #define ESCBIT (KEY_MAX+1)
 
+#if HAVE_BROKEN_ICONV
+typedef const char *iconv_input_type;
+#else
+typedef char *iconv_input_type;
+#endif
+
 /* Called to clean up before reporting an fatal error */
 static int (*onfatal)(void);
 
@@ -77,7 +83,8 @@ static void process_key(struct state *state, int ch);
 static void render(struct state *state);
 static void pad_line(int y, int x, size_t n);
 static double now(clockid_t c);
-static void fatal(int errno_value, const char *fmt, ...);
+static void fatal(int errno_value, const char *fmt, ...)
+  attribute((noreturn));
 
 /* A record of a line in a file */
 struct line {
@@ -108,7 +115,7 @@ struct line {
           fatal(errno, "iconv_open");
       assert(sizeof(wchar_t) == 4); // sanity check
       std::wstring wchars;
-      char *in = (char *)bytes.data();
+      iconv_input_type in = (iconv_input_type)bytes.data();
       size_t inleft = bytes.size();
       while(inleft > 0) {
         wchar_t words[128];

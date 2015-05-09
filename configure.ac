@@ -26,7 +26,11 @@ AC_LANG([C++])
 AC_PROG_CXX
 AC_SET_MAKE
 AC_CHECK_LIB([rt],[clock_gettime])
-PKG_CHECK_MODULES([ncursesw],[ncursesw])
+PKG_CHECK_MODULES([ncurses],[ncursesw],
+  [],
+  [PKG_CHECK_MODULES([ncurses],[ncurses],
+    [],[AC_SUBST([ncurses_LIBS],[-lcurses])
+        AC_SUBST([ncurses_CFLAGS],[])])])
 AC_CHECK_LIB([m],[floor],[LIBM=-lm])
 AC_SUBST([LIBM])
 AC_DEFINE([_GNU_SOURCE], [1], [use GNU extensions])
@@ -47,6 +51,10 @@ AC_ARG_ENABLE([coverage],[AS_HELP_STRING([--enable-coverage],
 if test "$enable_coverage" = yes; then
   CX="${CXX} ${coverage}"
 fi
+
+AC_ARG_WITH([broken-iconv],
+  [AS_HELP_STRING([--with-broken-iconv],[support broken iconv() prototype])],
+  AC_DEFINE([HAVE_BROKEN_ICONV],[1],[define if iconv() prototype is broken]))
 
 AH_BOTTOM([#ifdef __GNUC__
 # define attribute(x) __attribute__(x)
