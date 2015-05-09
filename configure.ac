@@ -25,9 +25,8 @@ AM_CONFIG_HEADER([config.h])
 AC_LANG([C++])
 AC_PROG_CXX
 AC_SET_MAKE
-AC_CHECK_LIB([ncurses],[initscr],[LIBCURSES=-lncurses])
 AC_CHECK_LIB([rt],[clock_gettime])
-AC_SUBST([LIBCURSES])
+PKG_CHECK_MODULES([ncursesw],[ncursesw])
 AC_CHECK_LIB([m],[floor],[LIBM=-lm])
 AC_SUBST([LIBM])
 AC_DEFINE([_GNU_SOURCE], [1], [use GNU extensions])
