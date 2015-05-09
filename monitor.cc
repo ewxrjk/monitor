@@ -56,6 +56,9 @@ static sigset_t sigoldmask;
 /* True to highlight changes */
 static int highlight_changes;
 
+/* True to show line numbers */
+static int line_numbers;
+
 static void help(FILE *fp);
 static void monitor(const char **cmd, double interval);
 static void setup_signals(void);
@@ -211,6 +214,10 @@ struct file {
   double expires;               // when this file expires
   std::vector<line> lines;      // contents of file
 
+  size_t size() const {
+    return lines.size();
+  }
+
   /* Find a line */
   line &at(size_t index) {
     static line dummy;
@@ -281,6 +288,7 @@ static const struct option options[] = {
   { "help", no_argument, 0, OPT_HELP },
   { "version", no_argument, 0, OPT_VERSION },
   { "interval", required_argument, 0, 'n' },
+  { "line-numbers", no_argument, 0, 'N' },
   { "shell", no_argument, 0, 's' },
   { "highlight", no_argument, 0, 'h' },
   { 0, 0, 0, 0 },
@@ -294,7 +302,7 @@ int main(int argc, char **argv) {
 
   if(!setlocale(LC_ALL, ""))
     fatal(errno, "setlocale");
-  while((n = getopt_long(argc, argv, "+n:sh",
+  while((n = getopt_long(argc, argv, "+n:sNh",
                          options, NULL)) >= 0) {
     switch(n) {
     case OPT_HELP:
@@ -315,6 +323,9 @@ int main(int argc, char **argv) {
         fatal(0, "invalid interval '%s': must be a number", optarg);
       if(interval < 0)
         fatal(0, "invalid interval '%s': must be positive", optarg);
+      break;
+    case 'N':
+      line_numbers = 1;
       break;
     case 's':
       shell = 1;
@@ -355,6 +366,7 @@ static void help(FILE *fp) {
           "Options:\n"
           "  -h, --highlight         Highlight changed lines\n"
           "  -n, --interval SECONDS  Delay between invocations of command\n"
+          "  -N, --line-numbers      Display line numbers\n"
           "  -s, --shell             Run command via the shell\n"
           "  --help                  Display usage message\n"
           "  --version               Display version string\n");
@@ -558,6 +570,11 @@ static void process_key(struct state *s, int ch) {
     if(redrawwin(stdscr) == ERR)
       fatal(0, "redrawwin failed");
     break;
+  case 'n':
+  case 'N':
+    line_numbers = !line_numbers;
+    s->render = 1;
+    break;
   case 'q':
   case 'Q':
     s->done = 1;
@@ -577,6 +594,7 @@ static void render(struct state *s) {
   char sbuf[128];
   char tbuf[128];
   time_t t;
+  int line_digits, left_margin;
 
   assert(s);
   assert(s->current);
@@ -587,6 +605,11 @@ static void render(struct state *s) {
     fatal(0, "erase failed");
   if(curs_set(0) == ERR)
     fatal(0, "curs_set");
+  if(line_numbers) {
+    line_digits = 1 + floor(log10(1 + s->current->size()));
+    left_margin = line_digits + 1;
+  } else
+    left_margin = 0;
   for(y = 0; y < height - 1; ++y) {
     // TODO the diff algorithm here is very primitive - any differing
     // lines are highlighted.  This handles insertions and deletions
@@ -599,6 +622,14 @@ static void render(struct state *s) {
       attroff(A_REVERSE);
     // Prefill with blanks
     pad_line(y, 0, width);
+    if(line_numbers && s->yo + y < s->current->size()) {
+      char line_number_buffer[128];
+      snprintf(line_number_buffer, sizeof line_number_buffer,
+               "%*zu ", line_digits, s->yo + y + 1);
+      if(mvaddnstr(y, 0, line_number_buffer,
+                   std::min(left_margin, width)) == ERR)
+        fatal(0, "mvnaddstr failed");
+    }
     const std::vector<cchar_t> &cchars = cl.get_cchars();
     size_t pos = 0, limit = cchars.size(), column = 0;
     while(pos < limit) {
@@ -611,7 +642,7 @@ static void render(struct state *s) {
       if(char_width < 0)
         char_width = 1;         // TODO blech
       if(column >= s->xo) {
-        int x = column - s->xo;
+        int x = left_margin + column - s->xo;
         if(x < width) {
           if(mvadd_wch(y, x, &cchars[pos]) == ERR)
             fatal(0, "mvins_wch failed (y=%d x=%d)", y, x);
