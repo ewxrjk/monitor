@@ -541,7 +541,8 @@ static void process_key(struct state *s, int ch) {
     break;
   case 14:                      /* ^N */
   case KEY_DOWN:
-    ++s->yo;
+    if(s->yo + 1 < s->current->size())
+      ++s->yo;
     break;
   case KEY_PPAGE:
     getmaxyx(stdscr, height, width);
@@ -556,8 +557,11 @@ static void process_key(struct state *s, int ch) {
   case KEY_NPAGE:
     getmaxyx(stdscr, height, width);
     discard(width);             /* quieten compiler */
-    if(height >= 2)
+    if(height >= 2) {
       s->yo += height - 2;
+      if(s->yo + 1 >= s->current->size())
+        s->yo = s->current->size() - 1;
+    }
     break;
   case 1:                       /* ^A */
     s->xo = 0;
