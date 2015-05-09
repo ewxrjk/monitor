@@ -168,27 +168,43 @@ struct line {
           continue;
         }
         const int char_width = wcwidth(wch);
-        if(char_width == -1) { // Control character.  TODO \o would be better?
-          chars[n++] = wchars[pos++];
+        if(wch == 0 || char_width == -1) {  // Control character or junk
+          wchar_t buffer[16];
+          if(wch < 0x80)
+            swprintf(buffer, sizeof buffer / sizeof buffer[0],
+                     L"\\%03o", (unsigned)wch);
+          else if(wch < 0x10000)
+            swprintf(buffer, sizeof buffer / sizeof buffer[0],
+                     L"\\u%04x", (unsigned)wch);
+          else
+            swprintf(buffer, sizeof buffer / sizeof buffer[0],
+                     L"\\U%08x", (unsigned)wch);
+          for(size_t m = 0; buffer[m]; ++m) {
+            chars[0] = buffer[m];
+            chars[1] = 0;
+            if(setcchar(&cc, chars, 0/*TODO*/, 0, NULL) == ERR)
+              fatal(0, "setcchar failed");
+            cchars.push_back(cc);
+          }
+          ++pos;
+          continue;
+        }
+        if(char_width == 0) {
+          // Starts with a nonspacing character.  Bodge something up...
+          chars[n++] = L' ';
           column += 1;
         } else {
-          if(char_width == 0) {
-            // Starts with a nonspacing character.  Bodge something up...
-            chars[n++] = L' ';
-            column += 1;
-          } else {
-            chars[n++] = wchars[pos++];
-            column += char_width;
-          }
-          while(pos < limit && wcwidth(wchars[pos]) == 0) {
-            // Combining character sequences that are too long are
-            // simply truncated.
-            // TODO converting to NFC (if not already there) would provide
-            // a bit more room.
-            if(n < CCHARW_MAX)
-              chars[n++] = wchars[pos];
-            ++pos;
-          }
+          chars[n++] = wchars[pos++];
+          column += char_width;
+        }
+        while(pos < limit && wchars[pos] && wcwidth(wchars[pos]) == 0) {
+          // Combining character sequences that are too long are
+          // simply truncated.
+          // TODO converting to NFC (if not already there) would provide
+          // a bit more room.
+          if(n < CCHARW_MAX)
+            chars[n++] = wchars[pos];
+          ++pos;
         }
         chars[n] = 0;
         if(setcchar(&cc, chars, 0/*TODO*/, 0, NULL) == ERR)

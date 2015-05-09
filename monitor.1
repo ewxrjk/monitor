@@ -94,12 +94,25 @@ monitor \-\-highlight \-\-shell 'du \-kx | sort \-nr'
 
 .fi
 .in
-.SH NOTE
+.SH NOTES
+.SS "Use of shell"
 The default behavior is to avoid use of the shell, making
 \fBmonitor\fR an \*(lqadverbial\*(rq command with the same syntax as
 \fBnice\fR(1), \fBnohup\fR(1) etc.
 The \fB--shell\fR option changes this, concanenating all the arguments
 and passing them to the shell.
+.SS "Control characters"
+The following escape sequences are used:
+.TP
+.BI \(rs NNN
+Octal escapes represent either single bytes that could not be
+interpreted, or 7-bit control characters.
+.TP
+.BI \(rsu HHHH
+.TP
+.BI \(rsu HHHHHHHH
+Hex escapes represent Unicode control characters and unassigned characters.
+If four digits will do then that is used, otherwise 8 digits is used.
 .SH ENVIRONMENT
 .TP
 .B SHELL
