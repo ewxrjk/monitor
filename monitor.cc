@@ -16,7 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
  * USA
  */
-#include <config.h>
+#include "monitor.h"
 #include <cassert>
 #include <cerrno>
 #include <clocale>
@@ -47,12 +47,6 @@ typedef const char *iconv_input_type;
 typedef char *iconv_input_type;
 #endif
 
-/* Called to clean up before reporting an fatal error */
-static int (*onfatal)(void);
-
-/* Called to exit the process */
-static void (*terminate)(int) attribute((noreturn)) = exit;
-
 /* Pipe from signal handler back to event loop */
 static int sigpipe[2];
 
@@ -82,9 +76,6 @@ static void process_keyboard(struct state *s);
 static void process_key(struct state *state, int ch);
 static void render(struct state *state);
 static void pad_line(int y, int x, size_t n);
-static double now(clockid_t c);
-static void fatal(int errno_value, const char *fmt, ...)
-  attribute((noreturn));
 
 /* A record of a line in a file */
 struct line {
@@ -231,7 +222,7 @@ struct line {
 /* An entire file, read from a subprocess */
 struct file {
   /* Create a file with a given expiry interval */
-  file(double interval) : expires(now(CLOCK_MONOTONIC) + interval) {
+  file(double interval) : expires(time_monotonic() + interval) {
   }
 
   double expires;               // when this file expires
@@ -280,7 +271,7 @@ struct file {
 
   /* Return true if this file is out of date */
   bool out_of_date() const {
-    return now(CLOCK_MONOTONIC) >= expires;
+    return time_monotonic() >= expires;
   }
 };
 
@@ -404,9 +395,16 @@ static void monitor(const char **cmd, double interval) {
   teardown_curses();
 }
 
+static void set_fd(fd_set &rfds, int fd, int &maxfd) {
+  if(fd >= 0) {
+    FD_SET(fd, &rfds);
+    if(fd > maxfd)
+      maxfd = fd;
+  }
+}
+
 /* Monitor a command */
 static void mainloop(const char **cmd, double interval) {
-  struct pollfd pfds[3];
   struct timespec timeout;
   double reinvoke_left, clock_left, left, left_sec, left_nsec;
   struct state s[1];
@@ -422,16 +420,15 @@ static void mainloop(const char **cmd, double interval) {
       reinvoke(s, cmd, interval);
     assert(s->current);
     /* File descriptors to monitor */
-    memset(pfds, 0, sizeof pfds);
-    pfds[0].fd = sigpipe[0];
-    pfds[0].events = POLLIN;
-    pfds[1].fd = s->fd;
-    pfds[1].events = POLLIN;
-    pfds[2].fd = 0;
-    pfds[2].events = POLLIN;
+    fd_set rfds;
+    int maxfd = -1;
+    FD_ZERO(&rfds);
+    set_fd(rfds, sigpipe[0], maxfd);
+    set_fd(rfds, s->fd, maxfd);
+    set_fd(rfds, 0, maxfd);
     /* Figure out maximum timeout */
-    clock_left = s->clock_expires - now(CLOCK_REALTIME);
-    reinvoke_left = s->current->expires - now(CLOCK_MONOTONIC);
+    clock_left = s->clock_expires - time_realtime();
+    reinvoke_left = s->current->expires - time_monotonic();
     left = clock_left < reinvoke_left ? clock_left : reinvoke_left;
     if(left < 0)
       left = 0;
@@ -439,20 +436,20 @@ static void mainloop(const char **cmd, double interval) {
     timeout.tv_sec = floor(left_sec);
     timeout.tv_nsec = floor(left_nsec * 1.0E9);
     /* Wait for someting to happen */
-    if(ppoll(pfds, sizeof pfds / sizeof *pfds, &timeout, &sigoldmask) < 0) {
+    if(pselect(maxfd + 1, &rfds, NULL, NULL, &timeout, &sigoldmask) < 0) {
       if(errno == EINTR || errno == EAGAIN)
         continue;
       fatal(errno, "ppoll");
     }
     /* Process events */
     s->render = 0;
-    if(pfds[0].revents & (POLLIN|POLLHUP))
+    if(FD_ISSET(sigpipe[0], &rfds))
       process_signals(s);
-    if(pfds[1].revents & (POLLIN|POLLHUP))
+    if(s->fd >= 0 && FD_ISSET(s->fd, &rfds))
       process_input(s);
-    if(pfds[2].revents & (POLLIN|POLLHUP))
+    if(FD_ISSET(0, &rfds))
       process_keyboard(s);
-    if(!s->render && now(CLOCK_REALTIME) >= s->clock_expires)
+    if(!s->render && time_realtime() >= s->clock_expires)
       s->render = 1;
     /* Redraw if anything important has changed */
     if(s->render)
@@ -846,32 +843,4 @@ static void teardown_curses(void) {
   onfatal = NULL;
   if(endwin() == ERR)
     fatal(0, "endwin failed");
-}
-
-/* Miscellaneous ----------------------------------------------------------- */
-
-/* Return the time according to some system clock */
-static double now(clockid_t c) {
-  struct timespec ts;
-  if(clock_gettime(c, &ts) < 0)
-    fatal(errno, "clock_gettime %#x", (unsigned)c);
-  return ts.tv_sec + ts.tv_nsec / 1.0E9;
-}
-
-/* Report an error and terminate */
-static void fatal(int errno_value, const char *fmt, ...) {
-  va_list ap;
-
-  assert(fmt);
-  if(onfatal)
-    onfatal();
-  va_start(ap, fmt);
-  fprintf(stderr, "ERROR: ");
-  vfprintf(stderr, fmt, ap);
-  va_end(ap);
-  if(errno_value)
-    fprintf(stderr, ": %s\n", strerror(errno_value));
-  else
-    fprintf(stderr, "\n");
-  terminate(1);
 }

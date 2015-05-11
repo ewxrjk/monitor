@@ -26,6 +26,8 @@ AC_LANG([C++])
 AC_PROG_CXX
 AC_SET_MAKE
 AC_CHECK_LIB([rt],[clock_gettime])
+AC_CHECK_FUNCS([clock_gettime])
+AC_CHECK_FUNC([iconv_option],[],[AC_CHECK_LIB([iconv],[iconv_open])])
 PKG_CHECK_MODULES([ncurses],[ncursesw],
   [],
   [PKG_CHECK_MODULES([ncurses],[ncurses],

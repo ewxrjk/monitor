@@ -16,7 +16,7 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
 # USA
 bin_PROGRAMS=monitor
-monitor_SOURCES=monitor.cc
+monitor_SOURCES=monitor.cc clocks.cc fatal.cc monitor.h
 monitor_CPPFLAGS=$(ncurses_CFLAGS) -D_XOPEN_SOURCE_EXTENDED
 monitor_LDADD=$(ncurses_LIBS) $(LIBM)
 man_MANS=monitor.1
