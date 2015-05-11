@@ -31,8 +31,12 @@ AC_CHECK_FUNC([iconv_option],[],[AC_CHECK_LIB([iconv],[iconv_open])])
 PKG_CHECK_MODULES([ncurses],[ncursesw],
   [],
   [PKG_CHECK_MODULES([ncurses],[ncurses],
-    [],[AC_SUBST([ncurses_LIBS],[-lcurses])
-        AC_SUBST([ncurses_CFLAGS],[])])])
+    [],[AC_CHECK_LIB([curses],[setcchar],
+         [AC_SUBST([ncurses_LIBS],[-lcurses])
+          AC_SUBST([ncurses_CFLAGS],[])],
+         [AC_CHECK_LIB([cursesw],[setcchar],
+           [AC_SUBST([ncurses_LIBS],[-lcursesw])
+            AC_SUBST([ncurses_CFLAGS],[])])])])])
 AC_CHECK_LIB([m],[floor],[LIBM=-lm])
 AC_SUBST([LIBM])
 AC_DEFINE([_GNU_SOURCE], [1], [use GNU extensions])
