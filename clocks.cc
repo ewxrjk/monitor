@@ -25,7 +25,7 @@
 #endif
 
 #if HAVE_CLOCK_GETTIME
-double time_posix(clockid_t c) {
+static double time_posix(clockid_t c) {
   struct timespec ts;
   if(clock_gettime(c, &ts) < 0)
     fatal(errno, "clock_gettime %#x", (unsigned)c);
