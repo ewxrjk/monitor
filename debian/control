@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Richard Kettlewell <rjk@greenend.org.uk>
 Standards-Version: 3.9.2
 Homepage: https://github.com/ewxrjk/monitor
-Build-Depends: libncurses5-dev
+Build-Depends: libncursesw5-dev
 
 Package: monitor
 Architecture: any
