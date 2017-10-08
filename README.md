@@ -1,6 +1,8 @@
 monitor
 =======
 
+[![Build Status](https://travis-ci.org/ewxrjk/monitor.svg?branch=master)](https://travis-ci.org/ewxrjk/monitor)
+
 monitor runs a command repeatedly, constantly displaying the output.
 Cursor keys may be used to pan and scroll the output.
 Changed lines may be highlighted.
