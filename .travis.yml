@@ -1,13 +1,21 @@
+os:
+- linux
+- osx
+
 dist: trusty
-sudo: required
 language: cpp
+addons:
+  apt:
+    packages:
+    - libncurses5-dev
 compiler:
 - clang
 - gcc
 
-before_install:
-- sudo apt-get update -qq
-- sudo apt-get install -qq libncurses5-dev
+matrix:
+  exclude:
+  - os: osx
+    compiler: gcc
 
 script:
 - ./autogen.sh
