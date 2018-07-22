@@ -614,9 +614,9 @@ static void process_key(struct state *s, int ch) {
 static void render(struct state *s) {
   int width, height, y;
   size_t n;
-  char footer[128];
   char sbuf[128];
   char tbuf[128];
+  char footer[sizeof sbuf + sizeof tbuf + 32];
   time_t t;
   int line_digits, left_margin;
 
