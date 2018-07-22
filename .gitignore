@@ -15,6 +15,7 @@ config.status
 configure
 debian/*.log
 debian/*.substvars
+debian/debhelper-build-stamp
 debian/files
 monitor
 stamp-h1
