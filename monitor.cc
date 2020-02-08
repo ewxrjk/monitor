@@ -85,13 +85,19 @@ struct line {
   bool terminated;             // true if this line is finished
   bool have_cchars;            // true if cchars is valid
 
+  // Return a pointer to the bytes of the line.
+  // (Not 0-terminated.)
   const char *data() const {
     return bytes.data();
   }
+
+  // Return the byte size of the line (i.e. the size of data()).
   size_t size() const {
     return bytes.size();
   }
 
+  // Append a byte string to the line.
+  // Invalidates any previous return from get_cchars().
   void append(const char *s, size_t n) {
     if(n) {
       bytes.append(s, n);
@@ -99,13 +105,17 @@ struct line {
     }
   }
 
+  // Get a referebce to the cchar representation of the line
+  // (possibly computing it).
   const std::vector<cchar_t> &get_cchars() {
+    // Check for a cached copy
     if(!have_cchars) {
       // Keep an iconv handle around indefinitely
       static iconv_t cd = (iconv_t)-1;
       if(cd == (iconv_t)-1)
         if((cd = iconv_open("WCHAR_T", nl_langinfo(CODESET))) == (iconv_t)-1)
           fatal(errno, "iconv_open");
+      // Convert the bytes representation to a sequence of code points.
       assert(sizeof(wchar_t) == 4); // sanity check
       std::wstring wchars;
       iconv_input_type in = (iconv_input_type)bytes.data();
@@ -141,6 +151,7 @@ struct line {
           }
         }
       }
+      // Convert wchars to cchars
       cchars.clear();
       size_t pos = 0, limit = wchars.size(), column = 0;
       while(pos < limit) {
@@ -148,7 +159,8 @@ struct line {
         cchar_t cc;
         size_t n = 0;
         wchar_t wch = wchars[pos];
-        if(wch == L'\t') { // Expand tabs
+        // Expand tabs
+        if(wch == L'\t') {
           static int tabsize;
           if(!tabsize) {
             const char *e = getenv("TABSIZE");
@@ -166,8 +178,9 @@ struct line {
           ++pos;
           continue;
         }
+        // Escape control characters and other such junk
         const int char_width = wcwidth(wch);
-        if(wch == 0 || char_width == -1) { // Control character or junk
+        if(wch == 0 || char_width == -1) {
           wchar_t buffer[16];
           if(wch < 0x80)
             swprintf(buffer, sizeof buffer / sizeof buffer[0], L"\\%03o",
@@ -232,7 +245,7 @@ struct file {
     return lines.size();
   }
 
-  /* Find a line */
+  /* Find a line. Returns a dummy empty line if you run off the end. */
   line &at(size_t index) {
     static line dummy;
     if(index < lines.size())
@@ -241,23 +254,26 @@ struct file {
       return dummy;
   }
 
-  /* Find the last line */
+  /* Find the last line. Returns a dummy empty line if the file is empty. */
   line &last() {
     return lines.at(lines.size() - 1);
   }
 
-  /* Append data */
+  /* Append arbitrary data */
   void append(const char *s, size_t n) {
     size_t l;
     const char *e;
 
     while(n > 0) {
+      // Do we need a new line?
       if(lines.size() == 0 || last().terminated)
         lines.push_back(line());
       if(*s == '\n') {
+        // Newline character, mark the current line as complete.
         last().terminated = true;
         l = 1;
       } else {
+        // Bulk-add non-newline characters.
         if((e = static_cast<const char *>(memchr(s, '\n', n))))
           l = e - s;
         else
@@ -450,10 +466,14 @@ static void mainloop(const char **cmd, double interval) {
 
 /* Invoke the command and prepare to capture its output */
 static void reinvoke(struct state *s, const char **cmd, double interval) {
+  // Discard the previous output
   delete s->previous;
+  // Stop reading the current output, if it's being slow
   if(s->fd >= 0)
     close(s->fd);
+  // The current output becomes the previous output, for difference marking
   s->previous = s->current;
+  // Start gathering a new current output
   s->current = new file(interval);
   invoke(s, cmd);
 }
@@ -465,8 +485,10 @@ static void invoke(struct state *s, const char **cmd) {
   pid_t pid;
 
   assert(cmd);
+  // stdin will be /dev/null
   if(nullfd < 0 && (nullfd = open(_PATH_DEVNULL, O_RDONLY)) < 0)
     fatal(errno, _PATH_DEVNULL);
+  // stdout and stderr will be a pipe back to us
   if(pipe(p) < 0)
     fatal(errno, "pipe");
   switch(pid = fork()) {
