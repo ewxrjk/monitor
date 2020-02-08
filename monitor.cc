@@ -131,7 +131,7 @@ struct line {
           default: fatal(errno, "iconv");
           }
           // Use C-like octal escapes for anything that could not be converted
-          assert(inleft > escape);
+          assert(inleft >= escape);
           while(escape > 0) {
             swprintf(words, sizeof words / sizeof *words, L"\\%03o",
                      (unsigned char)*in);
