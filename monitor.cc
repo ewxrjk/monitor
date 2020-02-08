@@ -39,7 +39,7 @@
 #include <unistd.h>
 #include <vector>
 
-#define ESCBIT (KEY_MAX+1)
+#define ESCBIT (KEY_MAX + 1)
 
 #if HAVE_BROKEN_ICONV
 typedef const char *iconv_input_type;
@@ -79,16 +79,18 @@ static void pad_line(int y, int x, size_t n);
 
 /* A record of a line in a file */
 struct line {
-  line(): terminated(false),
-          have_cchars(false) {
-  }
-  std::string bytes;            // contents of this line
-  std::vector<cchar_t> cchars;  // cchar_t representation
-  bool terminated;              // true if this line is finished
-  bool have_cchars;             // true if cchars is valid
+  line(): terminated(false), have_cchars(false) {}
+  std::string bytes;           // contents of this line
+  std::vector<cchar_t> cchars; // cchar_t representation
+  bool terminated;             // true if this line is finished
+  bool have_cchars;            // true if cchars is valid
 
-  const char *data() const { return bytes.data(); }
-  size_t size() const { return bytes.size(); }
+  const char *data() const {
+    return bytes.data();
+  }
+  size_t size() const {
+    return bytes.size();
+  }
 
   void append(const char *s, size_t n) {
     if(n) {
@@ -117,23 +119,22 @@ struct line {
         if(rc == (size_t)-1) {
           size_t escape;
           switch(errno) {
-          case EILSEQ:          // invalid sequence
-            escape = 1;         // escape one byte and pick up after that
+          case EILSEQ:  // invalid sequence
+            escape = 1; // escape one byte and pick up after that
             break;
-          case EINVAL:          // incomplete sequence
-            escape = inleft;    // escape the whole sequence
+          case EINVAL:       // incomplete sequence
+            escape = inleft; // escape the whole sequence
             break;
-          case E2BIG:           // words[] not big enough
-            escape = 0;         // come back round next time
+          case E2BIG:   // words[] not big enough
+            escape = 0; // come back round next time
             break;
-          default:
-            fatal(errno, "iconv");
+          default: fatal(errno, "iconv");
           }
           // Use C-like octal escapes for anything that could not be converted
           assert(inleft > escape);
           while(escape > 0) {
-            swprintf(words, sizeof words / sizeof *words,
-                     L"\\%03o", (unsigned char)*in);
+            swprintf(words, sizeof words / sizeof *words, L"\\%03o",
+                     (unsigned char)*in);
             wchars.append(words);
             ++in;
             --inleft;
@@ -143,7 +144,7 @@ struct line {
       cchars.clear();
       size_t pos = 0, limit = wchars.size(), column = 0;
       while(pos < limit) {
-        wchar_t chars[CCHARW_MAX+1];
+        wchar_t chars[CCHARW_MAX + 1];
         cchar_t cc;
         size_t n = 0;
         wchar_t wch = wchars[pos];
@@ -156,7 +157,7 @@ struct line {
           }
           chars[0] = L' ';
           chars[1] = 0;
-          if(setcchar(&cc, chars, 0/*TODO*/, 0, NULL) == ERR)
+          if(setcchar(&cc, chars, 0 /*TODO*/, 0, NULL) == ERR)
             fatal(0, "setcchar failed");
           do {
             cchars.push_back(cc);
@@ -166,21 +167,21 @@ struct line {
           continue;
         }
         const int char_width = wcwidth(wch);
-        if(wch == 0 || char_width == -1) {  // Control character or junk
+        if(wch == 0 || char_width == -1) { // Control character or junk
           wchar_t buffer[16];
           if(wch < 0x80)
-            swprintf(buffer, sizeof buffer / sizeof buffer[0],
-                     L"\\%03o", (unsigned)wch);
+            swprintf(buffer, sizeof buffer / sizeof buffer[0], L"\\%03o",
+                     (unsigned)wch);
           else if(wch < 0x10000)
-            swprintf(buffer, sizeof buffer / sizeof buffer[0],
-                     L"\\u%04x", (unsigned)wch);
+            swprintf(buffer, sizeof buffer / sizeof buffer[0], L"\\u%04x",
+                     (unsigned)wch);
           else
-            swprintf(buffer, sizeof buffer / sizeof buffer[0],
-                     L"\\U%08x", (unsigned)wch);
+            swprintf(buffer, sizeof buffer / sizeof buffer[0], L"\\U%08x",
+                     (unsigned)wch);
           for(size_t m = 0; buffer[m]; ++m) {
             chars[0] = buffer[m];
             chars[1] = 0;
-            if(setcchar(&cc, chars, 0/*TODO*/, 0, NULL) == ERR)
+            if(setcchar(&cc, chars, 0 /*TODO*/, 0, NULL) == ERR)
               fatal(0, "setcchar failed");
             cchars.push_back(cc);
           }
@@ -205,7 +206,7 @@ struct line {
           ++pos;
         }
         chars[n] = 0;
-        if(setcchar(&cc, chars, 0/*TODO*/, 0, NULL) == ERR)
+        if(setcchar(&cc, chars, 0 /*TODO*/, 0, NULL) == ERR)
           fatal(0, "setcchar failed");
         cchars.push_back(cc);
         assert(pos > 0);
@@ -222,11 +223,10 @@ struct line {
 /* An entire file, read from a subprocess */
 struct file {
   /* Create a file with a given expiry interval */
-  file(double interval) : expires(time_monotonic() + interval) {
-  }
+  file(double interval): expires(time_monotonic() + interval) {}
 
-  double expires;               // when this file expires
-  std::vector<line> lines;      // contents of file
+  double expires;          // when this file expires
+  std::vector<line> lines; // contents of file
 
   size_t size() const {
     return lines.size();
@@ -243,7 +243,7 @@ struct file {
 
   /* Find the last line */
   line &last() {
-    return lines.at(lines.size()-1);
+    return lines.at(lines.size() - 1);
   }
 
   /* Append data */
@@ -277,21 +277,21 @@ struct file {
 
 /* State of the event loop */
 struct state {
-  size_t xo;                    /* scrolling X offset */
-  size_t yo;                    /* scrolling Y offset */
-  struct file *previous;        /* previous file output or NULL */
-  struct file *current;         /* current file output */
-  int done;                     /* set by 'q' */
-  int render;                   /* set to redraw after events processed */
-  pid_t pid;                    /* subprocess ID or -1 */
-  int fd;                       /* input from current process or -1 */
-  int status;                   /* subprocess status or -1 */
-  int escaped;                  /* set after ESC key pressed */
-  double clock_expires;         /* time at which clock display goes stale */
+  size_t xo;             /* scrolling X offset */
+  size_t yo;             /* scrolling Y offset */
+  struct file *previous; /* previous file output or NULL */
+  struct file *current;  /* current file output */
+  int done;              /* set by 'q' */
+  int render;            /* set to redraw after events processed */
+  pid_t pid;             /* subprocess ID or -1 */
+  int fd;                /* input from current process or -1 */
+  int status;            /* subprocess status or -1 */
+  int escaped;           /* set after ESC key pressed */
+  double clock_expires;  /* time at which clock display goes stale */
 };
 
 /* Signals handled through the pipe */
-static const int signals[] = { SIGCHLD, SIGWINCH };
+static const int signals[] = {SIGCHLD, SIGWINCH};
 
 enum {
   OPT_HELP = 256,
@@ -299,13 +299,13 @@ enum {
 };
 
 static const struct option options[] = {
-  { "help", no_argument, 0, OPT_HELP },
-  { "version", no_argument, 0, OPT_VERSION },
-  { "interval", required_argument, 0, 'n' },
-  { "line-numbers", no_argument, 0, 'N' },
-  { "shell", no_argument, 0, 's' },
-  { "highlight", no_argument, 0, 'h' },
-  { 0, 0, 0, 0 },
+    {"help", no_argument, 0, OPT_HELP},
+    {"version", no_argument, 0, OPT_VERSION},
+    {"interval", required_argument, 0, 'n'},
+    {"line-numbers", no_argument, 0, 'N'},
+    {"shell", no_argument, 0, 's'},
+    {"highlight", no_argument, 0, 'h'},
+    {0, 0, 0, 0},
 };
 
 int main(int argc, char **argv) {
@@ -316,18 +316,11 @@ int main(int argc, char **argv) {
 
   if(!setlocale(LC_ALL, ""))
     fatal(errno, "setlocale");
-  while((n = getopt_long(argc, argv, "+n:sNh",
-                         options, NULL)) >= 0) {
+  while((n = getopt_long(argc, argv, "+n:sNh", options, NULL)) >= 0) {
     switch(n) {
-    case OPT_HELP:
-      help(stdout);
-      return 0;
-    case OPT_VERSION:
-      puts(PACKAGE_VERSION);
-      return 0;
-    case 'h':
-      highlight_changes = 1;
-      break;
+    case OPT_HELP: help(stdout); return 0;
+    case OPT_VERSION: puts(PACKAGE_VERSION); return 0;
+    case 'h': highlight_changes = 1; break;
     case 'n':
       errno = 0;
       interval = strtod(optarg, &e);
@@ -338,14 +331,9 @@ int main(int argc, char **argv) {
       if(interval < 0)
         fatal(0, "invalid interval '%s': must be positive", optarg);
       break;
-    case 'N':
-      line_numbers = 1;
-      break;
-    case 's':
-      shell = 1;
-      break;
-    default:
-      return 1;
+    case 'N': line_numbers = 1; break;
+    case 's': shell = 1; break;
+    default: return 1;
     }
   }
   if(optind >= argc) {
@@ -374,16 +362,15 @@ int main(int argc, char **argv) {
 
 /* Display usage message */
 static void help(FILE *fp) {
-  fprintf(fp,
-          "Usage:\n"
-          "  monitor [OPTIONS] [--] COMMAND [ARG ...]\n"
-          "Options:\n"
-          "  -h, --highlight         Highlight changed lines\n"
-          "  -n, --interval SECONDS  Delay between invocations of command\n"
-          "  -N, --line-numbers      Display line numbers\n"
-          "  -s, --shell             Run command via the shell\n"
-          "  --help                  Display usage message\n"
-          "  --version               Display version string\n");
+  fprintf(fp, "Usage:\n"
+              "  monitor [OPTIONS] [--] COMMAND [ARG ...]\n"
+              "Options:\n"
+              "  -h, --highlight         Highlight changed lines\n"
+              "  -n, --interval SECONDS  Delay between invocations of command\n"
+              "  -N, --line-numbers      Display line numbers\n"
+              "  -s, --shell             Run command via the shell\n"
+              "  --help                  Display usage message\n"
+              "  --version               Display version string\n");
 }
 
 /* Main loop --------------------------------------------------------------- */
@@ -494,10 +481,8 @@ static void invoke(struct state *s, const char **cmd) {
     if(execvp(cmd[0], (char **)cmd) < 0)
       fatal(errno, "execvp %s", cmd[0]);
     fatal(0, "execvp unexpectedly returned");
-  default:
-    break;
-  case -1:
-    fatal(errno, "fork");
+  default: break;
+  case -1: fatal(errno, "fork");
   }
   if(close(p[1]) < 0)
     fatal(errno, "close");
@@ -545,28 +530,26 @@ static void process_key(struct state *s, int ch) {
   int width, height;
   size_t oxo = s->xo, oyo = s->yo;
   switch(ch) {
-  case 2:                       /* ^B */
+  case 2: /* ^B */
   case KEY_LEFT:
     if(s->xo)
       --s->xo;
     break;
-  case 6:                       /* ^F */
-  case KEY_RIGHT:
-    ++s->xo;
-    break;
-  case 16:                      /* ^P */
+  case 6: /* ^F */
+  case KEY_RIGHT: ++s->xo; break;
+  case 16: /* ^P */
   case KEY_UP:
     if(s->yo)
       --s->yo;
     break;
-  case 14:                      /* ^N */
+  case 14: /* ^N */
   case KEY_DOWN:
     if(s->yo + 1 < s->current->size())
       ++s->yo;
     break;
   case KEY_PPAGE:
     getmaxyx(stdscr, height, width);
-    discard(width);             /* quieten compiler */
+    discard(width); /* quieten compiler */
     if(height >= 2) {
       if(s->yo > (unsigned)height - 2)
         s->yo -= height - 2;
@@ -576,16 +559,14 @@ static void process_key(struct state *s, int ch) {
     break;
   case KEY_NPAGE:
     getmaxyx(stdscr, height, width);
-    discard(width);             /* quieten compiler */
+    discard(width); /* quieten compiler */
     if(height >= 2) {
       s->yo += height - 2;
       if(s->yo + 1 >= s->current->size())
         s->yo = s->current->size() - 1;
     }
     break;
-  case 1:                       /* ^A */
-    s->xo = 0;
-    break;
+  case 1: /* ^A */ s->xo = 0; break;
   case KEY_HOME:
     s->xo = 0;
     s->yo = 0;
@@ -600,9 +581,7 @@ static void process_key(struct state *s, int ch) {
     s->render = 1;
     break;
   case 'q':
-  case 'Q':
-    s->done = 1;
-    break;
+  case 'Q': s->done = 1; break;
   }
   if(s->xo != oxo || s->yo != oyo)
     s->render = 1;
@@ -633,7 +612,7 @@ static void render(struct state *s) {
     line_digits = 1 + floor(log10(1 + s->current->size()));
     left_margin = line_digits + 1;
   } else {
-    line_digits = 0;            // quieten compiler
+    line_digits = 0; // quieten compiler
     left_margin = 0;
   }
   for(y = 0; y < height - 1; ++y) {
@@ -650,23 +629,23 @@ static void render(struct state *s) {
     pad_line(y, 0, width);
     if(line_numbers && s->yo + y < s->current->size()) {
       char line_number_buffer[128];
-      snprintf(line_number_buffer, sizeof line_number_buffer,
-               "%*zu ", line_digits, s->yo + y + 1);
-      if(mvaddnstr(y, 0, line_number_buffer,
-                   std::min(left_margin, width)) == ERR)
+      snprintf(line_number_buffer, sizeof line_number_buffer, "%*zu ",
+               line_digits, s->yo + y + 1);
+      if(mvaddnstr(y, 0, line_number_buffer, std::min(left_margin, width))
+         == ERR)
         fatal(0, "mvnaddstr failed");
     }
     const std::vector<cchar_t> &cchars = cl.get_cchars();
     size_t pos = 0, limit = cchars.size(), column = 0;
     while(pos < limit) {
-      wchar_t wchars[CCHARW_MAX+1];
+      wchar_t wchars[CCHARW_MAX + 1];
       attr_t attrs;
       short color_pair;
       if(getcchar(&cchars[pos], wchars, &attrs, &color_pair, NULL) == ERR)
         fatal(0, "getcchar failed");
       int char_width = wcwidth(wchars[0]);
       if(char_width < 0)
-        char_width = 1;         // TODO blech
+        char_width = 1; // TODO blech
       if(column >= s->xo) {
         int x = left_margin + column - s->xo;
         if(x < width) {
@@ -688,8 +667,7 @@ static void render(struct state *s) {
     if(WIFEXITED(s->status))
       snprintf(sbuf, sizeof sbuf, " [%d]", WEXITSTATUS(s->status));
     else if(WIFSIGNALED(s->status)) {
-      snprintf(sbuf, sizeof sbuf, " [%s%s]",
-               strsignal(WTERMSIG(s->status)),
+      snprintf(sbuf, sizeof sbuf, " [%s%s]", strsignal(WTERMSIG(s->status)),
                WCOREDUMP(s->status) ? " (core)" : "");
     } else
       snprintf(sbuf, sizeof sbuf, " [%#x?]", (unsigned)s->status);
@@ -697,13 +675,12 @@ static void render(struct state *s) {
     snprintf(sbuf, sizeof sbuf, " [running]");
   else
     sbuf[0] = 0;
-  snprintf(footer, sizeof footer,
-           "%zu:%zu%s %s", s->xo, s->yo, sbuf, tbuf);
+  snprintf(footer, sizeof footer, "%zu:%zu%s %s", s->xo, s->yo, sbuf, tbuf);
   n = strlen(footer);
   if(n > (unsigned)width)
     n = (unsigned)width;
-  if(mvinsnstr(height-1, 0, footer, n) == ERR)
-    fatal(0, "mvinsnstr failed (y=%d n=%zu)", height-1, n);
+  if(mvinsnstr(height - 1, 0, footer, n) == ERR)
+    fatal(0, "mvinsnstr failed (y=%d n=%zu)", height - 1, n);
   pad_line(height - 1, n, width - n);
   attroff(A_REVERSE);
   if(refresh() == ERR)
@@ -755,7 +732,7 @@ static void setup_signals(void) {
     if(sigaddset(&sighandled, signals[i]) < 0)
       fatal(errno, "sigaddset");
   }
-  if(sigprocmask(SIG_BLOCK, &sighandled, &sigoldmask) <0)
+  if(sigprocmask(SIG_BLOCK, &sighandled, &sigoldmask) < 0)
     fatal(errno, "sigprocmask");
 }
 
@@ -794,8 +771,7 @@ static void process_signals(struct state *s) {
       resizeterm(ws.ws_row, ws.ws_col);
       s->render = 1;
       break;
-    default:
-      fatal(0, "unexpected signal %d", sig);
+    default: fatal(0, "unexpected signal %d", sig);
     }
   }
   if(n < 0) {
@@ -807,7 +783,7 @@ static void process_signals(struct state *s) {
 }
 
 /* Quieten picky compilers */
-static void discard(int attribute((unused)) whatever) { }
+static void discard(int attribute((unused)) whatever) {}
 
 /* Handle a signal directly */
 static void sighandler(int sig) {
@@ -824,11 +800,11 @@ static void setup_curses(void) {
   if(!initscr())
     fatal(0, "initscr failed");
   onfatal = endwin;
-  if(cbreak() == ERR)           /* Read keys as they are pressed */
+  if(cbreak() == ERR) /* Read keys as they are pressed */
     fatal(0, "cbreak failed");
-  if(noecho() == ERR)           /* Suppress echoing of type keys */
+  if(noecho() == ERR) /* Suppress echoing of type keys */
     fatal(0, "noecho failed");
-  if(nonl() == ERR)             /* Suppress newline translation */
+  if(nonl() == ERR) /* Suppress newline translation */
     fatal(0, "nonl failed");
   if(intrflush(stdscr, FALSE) == ERR) /* Flush output on ^C */
     fatal(0, "initrflush failed");
