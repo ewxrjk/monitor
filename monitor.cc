@@ -293,17 +293,18 @@ struct file {
 
 /* State of the event loop */
 struct state {
-  size_t xo;             /* scrolling X offset */
-  size_t yo;             /* scrolling Y offset */
-  struct file *previous; /* previous file output or NULL */
-  struct file *current;  /* current file output */
-  int done;              /* set by 'q' */
-  int render;            /* set to redraw after events processed */
-  pid_t pid;             /* subprocess ID or -1 */
-  int fd;                /* input from current process or -1 */
-  int status;            /* subprocess status or -1 */
-  int escaped;           /* set after ESC key pressed */
-  double clock_expires;  /* time at which clock display goes stale */
+  size_t xo;              /* scrolling X offset */
+  size_t yo;              /* scrolling Y offset */
+  struct file *previous;  /* previously displayed output or NULL */
+  struct file *displayed; /* currently displayed output */
+  struct file *reading;   /* currently reading output; could = displayed */
+  int done;               /* set by 'q' */
+  int render;             /* set to redraw after events processed */
+  pid_t pid;              /* subprocess ID or -1 */
+  int fd;                 /* input from current process or -1 */
+  int status;             /* subprocess status or -1 */
+  int escaped;            /* set after ESC key pressed */
+  double clock_expires;   /* time at which clock display goes stale */
 };
 
 /* Signals handled through the pipe */
@@ -419,9 +420,23 @@ static void mainloop(const char **cmd, double interval) {
   s->status = -1;
   while(!s->done) {
     /* Start a new subprocess if the old output has gone stale */
-    if(!s->current || s->current->out_of_date())
+    bool stale = false;
+    if(!s->reading)
+      stale = true;
+    else if(s->reading->out_of_date()) {
+      // If the subprocess is slow, give it extra time.
+      //
+      // If output trickles out then you'll still never see the later bits;
+      // you have to manually set a long interval.
+      if(s->fd == -1 || s->reading->size() > 0)
+        stale = true;
+    }
+    if(stale)
       reinvoke(s, cmd, interval);
-    assert(s->current);
+    assert(s->reading);
+    // Make sure there is something to display
+    if(!s->displayed)
+      s->displayed = s->reading;
     /* File descriptors to monitor */
     fd_set rfds;
     int maxfd = -1;
@@ -431,7 +446,7 @@ static void mainloop(const char **cmd, double interval) {
     set_fd(rfds, 0, maxfd);
     /* Figure out maximum timeout */
     clock_left = s->clock_expires - time_realtime();
-    reinvoke_left = s->current->expires - time_monotonic();
+    reinvoke_left = s->reading->expires - time_monotonic();
     left = clock_left < reinvoke_left ? clock_left : reinvoke_left;
     if(left < 0)
       left = 0;
@@ -458,7 +473,9 @@ static void mainloop(const char **cmd, double interval) {
     if(s->render)
       render(s);
   }
-  delete s->current;
+  if(s->reading && s->reading != s->displayed)
+    delete s->reading;
+  delete s->displayed;
   delete s->previous;
 }
 
@@ -466,15 +483,14 @@ static void mainloop(const char **cmd, double interval) {
 
 /* Invoke the command and prepare to capture its output */
 static void reinvoke(struct state *s, const char **cmd, double interval) {
-  // Discard the previous output
-  delete s->previous;
   // Stop reading the current output, if it's being slow
   if(s->fd >= 0)
     close(s->fd);
-  // The current output becomes the previous output, for difference marking
-  s->previous = s->current;
+  // If we never promoted the current reading file to display, discard it
+  if(s->reading && s->reading != s->displayed)
+    delete s->reading;
   // Start gathering a new current output
-  s->current = new file(interval);
+  s->reading = new file(interval);
   invoke(s, cmd);
 }
 
@@ -510,6 +526,7 @@ static void invoke(struct state *s, const char **cmd) {
     fatal(errno, "close");
   s->fd = p[0];
   s->pid = pid;
+  s->status = -1;
 }
 
 /* Process input from the command */
@@ -518,7 +535,15 @@ static void process_input(struct state *s) {
   int n;
   assert(s->fd >= 0);
   while((n = read(s->fd, buffer, sizeof buffer)) > 0) {
-    s->current->append(buffer, n);
+    s->reading->append(buffer, n);
+    // Now that we have some data, promote the current reading file to be
+    // displayed
+    if(s->reading != s->displayed) {
+      delete s->previous;
+      s->previous = s->displayed;
+      s->displayed = s->reading;
+    }
+    // Something has changed, so update the display
     s->render = 1;
   }
   if(n < 0) {
@@ -566,7 +591,7 @@ static void process_key(struct state *s, int ch) {
     break;
   case 14: /* ^N */
   case KEY_DOWN:
-    if(s->yo + 1 < s->current->size())
+    if(s->yo + 1 < s->displayed->size())
       ++s->yo;
     break;
   case KEY_PPAGE:
@@ -584,8 +609,8 @@ static void process_key(struct state *s, int ch) {
     discard(width); /* quieten compiler */
     if(height >= 2) {
       s->yo += height - 2;
-      if(s->yo + 1 >= s->current->size())
-        s->yo = s->current->size() - 1;
+      if(s->yo + 1 >= s->displayed->size())
+        s->yo = s->displayed->size() - 1;
     }
     break;
   case 1: /* ^A */ s->xo = 0; break;
@@ -617,12 +642,13 @@ static void render(struct state *s) {
   size_t n;
   char sbuf[128];
   char tbuf[128];
-  char footer[sizeof sbuf + sizeof tbuf + 32];
+  char xbuf[128];
+  char footer[sizeof sbuf + sizeof tbuf + sizeof xbuf + 32];
   time_t t;
   int line_digits, left_margin;
 
   assert(s);
-  assert(s->current);
+  assert(s->displayed);
   getmaxyx(stdscr, height, width);
   if(width <= 0 || height <= 1)
     return;
@@ -631,7 +657,7 @@ static void render(struct state *s) {
   if(curs_set(0) == ERR)
     fatal(0, "curs_set");
   if(line_numbers) {
-    line_digits = 1 + floor(log10(1 + s->current->size()));
+    line_digits = 1 + floor(log10(1 + s->displayed->size()));
     left_margin = line_digits + 1;
   } else {
     line_digits = 0; // quieten compiler
@@ -641,15 +667,15 @@ static void render(struct state *s) {
     // TODO the diff algorithm here is very primitive - any differing
     // lines are highlighted.  This handles insertions and deletions
     // very badly.  Sub-line diff handling would also be nice.
-    line &pl = (s->previous ? s->previous : s->current)->at(s->yo + y);
-    line &cl = s->current->at(s->yo + y);
+    line &pl = (s->previous ? s->previous : s->displayed)->at(s->yo + y);
+    line &cl = s->displayed->at(s->yo + y);
     if(highlight_changes && pl != cl)
       attron(A_REVERSE);
     else
       attroff(A_REVERSE);
     // Prefill with blanks
     pad_line(y, 0, width);
-    if(line_numbers && s->yo + y < s->current->size()) {
+    if(line_numbers && s->yo + y < s->displayed->size()) {
       char line_number_buffer[128];
       snprintf(line_number_buffer, sizeof line_number_buffer, "%*zu ",
                line_digits, s->yo + y + 1);
@@ -687,17 +713,22 @@ static void render(struct state *s) {
     tbuf[0] = 0;
   if(s->status >= 0) {
     if(WIFEXITED(s->status))
-      snprintf(sbuf, sizeof sbuf, " [%d]", WEXITSTATUS(s->status));
+      snprintf(xbuf, sizeof xbuf, " [%d]", WEXITSTATUS(s->status));
     else if(WIFSIGNALED(s->status)) {
-      snprintf(sbuf, sizeof sbuf, " [%s%s]", strsignal(WTERMSIG(s->status)),
-               WCOREDUMP(s->status) ? " (core)" : "");
+      snprintf(xbuf, sizeof xbuf, " [%s]", strsignal(WTERMSIG(s->status)));
     } else
-      snprintf(sbuf, sizeof sbuf, " [%#x?]", (unsigned)s->status);
-  } else if(s->fd >= 0)
-    snprintf(sbuf, sizeof sbuf, " [running]");
+      snprintf(xbuf, sizeof xbuf, " [%#x?]", (unsigned)s->status);
+  } else
+    xbuf[0] = 0;
+  if(s->fd >= 0)
+    if(s->reading->size())
+      snprintf(sbuf, sizeof sbuf, "[running]");
+    else
+      snprintf(sbuf, sizeof sbuf, "[blocked]");
   else
-    sbuf[0] = 0;
-  snprintf(footer, sizeof footer, "%zu:%zu%s %s", s->xo, s->yo, sbuf, tbuf);
+    snprintf(sbuf, sizeof sbuf, "[pausing]");
+  snprintf(footer, sizeof footer, "%zu:%zu %s %s%s", s->xo, s->yo, tbuf, sbuf,
+           xbuf);
   n = strlen(footer);
   if(n > (unsigned)width)
     n = (unsigned)width;

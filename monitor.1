@@ -116,6 +116,34 @@ interpreted, or 7-bit control characters.
 .BI \(rsu HHHHHHHH
 Hex escapes represent Unicode control characters and unassigned characters.
 If four digits will do then that is used, otherwise 8 digits is used.
+.SS "Status Line"
+The bottom line of the screen is a status line.
+.PP
+The first two integers reprsent the position in the file,
+with 0:0 being the start of the top line.
+This is followed by the current time and date.
+.PP
+The next part has one of the following values:
+.TP
+.B [blocked]
+The command is running but has not yet produced output.
+In this state the interval between repeated runs of the commandis automatically extended,
+to avoid constantly showing a blank screen.
+.TP
+.B [running]
+The command is running and has produced some output.
+.TP
+.B [pausing]
+The command has completed and it isn't yet time to run it again.
+.PP
+If \fB[pausing]\fR is never displayed then the command takes longer than
+the interval specified on the command line.
+.PP
+The last part represents the exit status of the last time the command was run.
+0 means it succeeded,
+any other integers means it exited with that status,
+a the name of a signal means it was terminated by that signal.
+This part isn't displayed while a command is running.
 .SH ENVIRONMENT
 .TP
 .B SHELL
