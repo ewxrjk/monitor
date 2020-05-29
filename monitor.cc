@@ -235,8 +235,20 @@ struct line {
 
 /* An entire file, read from a subprocess */
 struct file {
-  /* Create a file with a given expiry interval */
-  file(double interval): expires(time_monotonic() + interval) {}
+  /* Create a file with a given expiry interval
+   * If hint is present, it is used to size the lines
+   * array, to avoid lots of copying and reallocation in the future.
+   */
+  file(double interval, file *hint = nullptr):
+      expires(time_monotonic() + interval) {
+    size_t initial_lines = 64;
+    if(hint) {
+      size_t hint_lines = hint->lines.size();
+      if(hint_lines > initial_lines)
+        initial_lines = hint_lines;
+    }
+    lines.reserve(initial_lines);
+  }
 
   double expires;          // when this file expires
   std::vector<line> lines; // contents of file
@@ -267,7 +279,7 @@ struct file {
     while(n > 0) {
       // Do we need a new line?
       if(lines.size() == 0 || last().terminated)
-        lines.push_back(line());
+        lines.resize(lines.size() + 1);
       if(*s == '\n') {
         // Newline character, mark the current line as complete.
         last().terminated = true;
@@ -412,12 +424,14 @@ static void mainloop(const char **cmd, double interval) {
   struct timespec timeout;
   double reinvoke_left, clock_left, left, left_sec, left_nsec;
   struct state s[1];
+  fd_set rfds;
 
   assert(interval > 0);
   memset(s, 0, sizeof *s);
   s->fd = -1;
   s->pid = -1;
   s->status = -1;
+  FD_ZERO(&rfds);
   while(!s->done) {
     /* Start a new subprocess if the old output has gone stale */
     bool stale = false;
@@ -438,9 +452,7 @@ static void mainloop(const char **cmd, double interval) {
     if(!s->displayed)
       s->displayed = s->reading;
     /* File descriptors to monitor */
-    fd_set rfds;
     int maxfd = -1;
-    FD_ZERO(&rfds);
     set_fd(rfds, sigpipe[0], maxfd);
     set_fd(rfds, s->fd, maxfd);
     set_fd(rfds, 0, maxfd);
@@ -463,8 +475,11 @@ static void mainloop(const char **cmd, double interval) {
     s->render = 0;
     if(FD_ISSET(sigpipe[0], &rfds))
       process_signals(s);
-    if(s->fd >= 0 && FD_ISSET(s->fd, &rfds))
+    if(s->fd >= 0 && FD_ISSET(s->fd, &rfds)) {
+      int sfd = s->fd;
       process_input(s);
+      FD_CLR(sfd, &rfds);
+    }
     if(FD_ISSET(0, &rfds))
       process_keyboard(s);
     if(!s->render && time_realtime() >= s->clock_expires)
@@ -490,7 +505,7 @@ static void reinvoke(struct state *s, const char **cmd, double interval) {
   if(s->reading && s->reading != s->displayed)
     delete s->reading;
   // Start gathering a new current output
-  s->reading = new file(interval);
+  s->reading = new file(interval, s->displayed);
   invoke(s, cmd);
 }
 
@@ -742,7 +757,10 @@ static void render(struct state *s) {
 
 /* Write n spaces at (y,x) */
 static void pad_line(int y, int x, size_t n) {
-  static const char padding[] = "        ";
+  static const char padding[] = "                                              "
+                                "                                              "
+                                "                                  "
+                                "                                  ";
   while(n > 0) {
     size_t this_time = n > strlen(padding) ? strlen(padding) : n;
     if(mvinsnstr(y, x, padding, this_time) == ERR)
