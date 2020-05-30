@@ -106,7 +106,7 @@ struct line {
     }
   }
 
-  // Get a referebce to the cchar representation of the line
+  // Get a reference to the cchar representation of the line
   // (possibly computing it).
   const std::vector<cchar_t> &get_cchars() {
     // Check for a cached copy
@@ -154,6 +154,7 @@ struct line {
       }
       // Convert wchars to cchars
       cchars.clear();
+      cchars.reserve(wchars.size());
       size_t pos = 0, limit = wchars.size(), column = 0;
       while(pos < limit) {
         wchar_t chars[CCHARW_MAX + 1];
