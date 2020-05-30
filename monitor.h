@@ -20,13 +20,55 @@
 #define MONITOR_H
 
 #include <config.h>
+#include <ctime>
+#include <sys/time.h>
 
 extern int (*onfatal)(void);
 extern void (*terminate)(int) attribute((noreturn));
 void fatal(int errno_value, const char *fmt, ...) attribute((noreturn));
 
-double time_monotonic();
-double time_realtime();
+struct timespec time_monotonic();
+struct timespec time_realtime();
+
+#define BILLION (1000 * 1000 * 1000)
+
+inline struct timespec operator+(struct timespec a, struct timespec b) {
+  struct timespec r = {a.tv_sec + b.tv_sec, a.tv_nsec + b.tv_nsec};
+  while(r.tv_nsec >= BILLION) {
+    r.tv_nsec -= BILLION;
+    r.tv_sec++;
+  }
+  return r;
+}
+
+inline struct timespec operator-(struct timespec a, struct timespec b) {
+  struct timespec r = {a.tv_sec - b.tv_sec, a.tv_nsec - b.tv_nsec};
+  while(r.tv_nsec < 0) {
+    r.tv_nsec += BILLION;
+    r.tv_sec--;
+  }
+  return r;
+}
+
+inline bool operator<(struct timespec a, struct timespec b) {
+  if(a.tv_sec < b.tv_sec)
+    return true;
+  if(a.tv_sec == b.tv_sec && a.tv_nsec < b.tv_nsec)
+    return true;
+  return false;
+}
+
+inline bool operator>(struct timespec a, struct timespec b) {
+  return b < a;
+}
+
+inline bool operator<=(struct timespec a, struct timespec b) {
+  return !(b < a);
+}
+
+inline bool operator>=(struct timespec a, struct timespec b) {
+  return !(a < b);
+}
 
 #endif /* MONITOR_H */
 

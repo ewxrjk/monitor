@@ -60,7 +60,7 @@ static int highlight_changes;
 static int line_numbers;
 
 static void help(FILE *fp);
-static void monitor(const char **cmd, double interval);
+static void monitor(const char **cmd, struct timespec interval);
 static void setup_signals(void);
 static void process_signals(struct state *s);
 static void reset_signals(void);
@@ -68,8 +68,9 @@ static void discard(int whatever);
 static void sighandler_sigchld(int), sighandler_sigwinch(int);
 static void setup_curses(void);
 static void teardown_curses(void);
-static void mainloop(const char **cmd, double interval);
-static void reinvoke(struct state *s, const char **cmd, double interval);
+static void mainloop(const char **cmd, struct timespec interval);
+static void reinvoke(struct state *s, const char **cmd,
+                     struct timespec interval);
 static void invoke(struct state *s, const char **cmd);
 static void process_input(struct state *s);
 static void process_keyboard(struct state *s);
@@ -239,7 +240,7 @@ struct file {
    * If hint is present, it is used to size the lines
    * array, to avoid lots of copying and reallocation in the future.
    */
-  file(double interval, file *hint = nullptr):
+  file(struct timespec interval, file *hint = nullptr):
       expires(time_monotonic() + interval) {
     size_t initial_lines = 64;
     if(hint) {
@@ -250,7 +251,7 @@ struct file {
     lines.reserve(initial_lines);
   }
 
-  double expires;          // when this file expires
+  struct timespec expires; // when this file expires
   std::vector<line> lines; // contents of file
 
   size_t size() const {
@@ -316,7 +317,7 @@ struct state {
   int fd;                 /* input from current process or -1 */
   int status;             /* subprocess status or -1 */
   int escaped;            /* set after ESC key pressed */
-  double clock_expires;   /* time at which clock display goes stale */
+  struct timespec clock_expires; /* time at which clock display goes stale */
 };
 
 /* Signals handled through the pipe */
@@ -342,6 +343,8 @@ int main(int argc, char **argv) {
   int n;
   char *e;
   double interval = 1.0;
+  double interval_int, interval_frac;
+  struct timespec interval_ts;
   int shell = 0;
 
   if(!setlocale(LC_ALL, ""))
@@ -371,6 +374,9 @@ int main(int argc, char **argv) {
     return 1;
   }
   setup_signals();
+  interval_frac = modf(interval, &interval_int);
+  interval_ts.tv_sec = floor(interval_int);
+  interval_ts.tv_nsec = floor(interval_frac * 1.0E9);
   if(shell) {
     std::string shell_command;
     const char *cmd[4];
@@ -384,9 +390,9 @@ int main(int argc, char **argv) {
     cmd[1] = "-c";
     cmd[2] = shell_command.c_str();
     cmd[3] = NULL;
-    monitor(cmd, interval);
+    monitor(cmd, interval_ts);
   } else
-    monitor((const char **)argv + optind, interval);
+    monitor((const char **)argv + optind, interval_ts);
   return 0;
 }
 
@@ -406,7 +412,7 @@ static void help(FILE *fp) {
 /* Main loop --------------------------------------------------------------- */
 
 /* Set up curses, monitor a command, and tear down curses */
-static void monitor(const char **cmd, double interval) {
+static void monitor(const char **cmd, struct timespec interval) {
   setup_curses();
   mainloop(cmd, interval);
   teardown_curses();
@@ -421,13 +427,12 @@ static void set_fd(fd_set &rfds, int fd, int &maxfd) {
 }
 
 /* Monitor a command */
-static void mainloop(const char **cmd, double interval) {
+static void mainloop(const char **cmd, struct timespec interval) {
   struct timespec timeout;
-  double reinvoke_left, clock_left, left, left_sec, left_nsec;
+  struct timespec reinvoke_left, clock_left;
   struct state s[1];
   fd_set rfds;
 
-  assert(interval > 0);
   memset(s, 0, sizeof *s);
   s->fd = -1;
   s->pid = -1;
@@ -457,20 +462,21 @@ static void mainloop(const char **cmd, double interval) {
     set_fd(rfds, s->fd, maxfd);
     set_fd(rfds, 0, maxfd);
     /* Figure out maximum timeout */
-    clock_left = s->clock_expires - time_realtime();
-    reinvoke_left = s->reading->expires - time_monotonic();
-    left = clock_left < reinvoke_left ? clock_left : reinvoke_left;
-    if(left < 0)
-      left = 0;
-    left_nsec = modf(left, &left_sec);
-    timeout.tv_sec = floor(left_sec);
-    timeout.tv_nsec = floor(left_nsec * 1.0E9);
-    /* Wait for someting to happen */
-    if(pselect(maxfd + 1, &rfds, NULL, NULL, &timeout, &sigoldmask) < 0) {
-      switch(errno) {
-      case EINTR:
-      case EAGAIN: break;
-      default: fatal(errno, "pselect");
+    clock_left =
+        s->clock_expires - time_realtime(); // Time before clock advances
+    reinvoke_left = s->reading->expires
+                    - time_monotonic(); // Time before re-running program
+    timeout = clock_left < reinvoke_left
+                  ? clock_left
+                  : reinvoke_left; // Time before anything happens
+    if(timeout.tv_sec >= 0) {
+      /* Wait for something to happen */
+      if(pselect(maxfd + 1, &rfds, NULL, NULL, &timeout, &sigoldmask) < 0) {
+        switch(errno) {
+        case EINTR:
+        case EAGAIN: break;
+        default: fatal(errno, "pselect");
+        }
       }
     }
     /* Process events */
@@ -498,7 +504,8 @@ static void mainloop(const char **cmd, double interval) {
 /* Command invocation ------------------------------------------------------ */
 
 /* Invoke the command and prepare to capture its output */
-static void reinvoke(struct state *s, const char **cmd, double interval) {
+static void reinvoke(struct state *s, const char **cmd,
+                     struct timespec interval) {
   // Stop reading the current output, if it's being slow
   if(s->fd >= 0)
     close(s->fd);
@@ -724,7 +731,8 @@ static void render(struct state *s) {
   }
   attron(A_REVERSE);
   time(&t);
-  s->clock_expires = t + 1;
+  s->clock_expires.tv_sec = t + 1;
+  s->clock_expires.tv_nsec = 0;
   if(strftime(tbuf, sizeof tbuf, "%c", localtime(&t)) == 0)
     tbuf[0] = 0;
   if(s->status >= 0) {
