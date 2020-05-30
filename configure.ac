@@ -45,6 +45,7 @@ if test "x$GXX" = xyes; then
   coverage="-fprofile-arcs -ftest-coverage"
   CXX="$CXX -Wall -W -Wpointer-arith -Wwrite-strings -Wmissing-declarations -Wshadow"
 fi
+CXXFLAGS="${CXXFLAGS} ${CXXFLAGS_EXTRA}"
 
 AC_ARG_ENABLE([werror],[AS_HELP_STRING([--disable-werror],[don't use -Werror])],
               [],[enable_werror=yes])

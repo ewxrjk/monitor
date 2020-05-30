@@ -1,5 +1,5 @@
 #!/bin/sh
 set -e
 set -x
-export CXXFLAGS_EXTRA="-Wno-error=deprecated-declarations"
+export CXXFLAGS_EXTRA="-Wno-error=deprecated-declarations -std=c++11"
 ./configure
