@@ -47,8 +47,8 @@ typedef const char *iconv_input_type;
 typedef char *iconv_input_type;
 #endif
 
-/* Pipe from signal handler back to event loop */
-static int sigpipe[2];
+/* Notifications from signal handler back to event loop */
+static volatile sig_atomic_t sigchld, sigwinch;
 
 /* Signal mask on entry */
 static sigset_t sigoldmask;
@@ -65,7 +65,7 @@ static void setup_signals(void);
 static void process_signals(struct state *s);
 static void reset_signals(void);
 static void discard(int whatever);
-static void sighandler(int sig);
+static void sighandler_sigchld(int), sighandler_sigwinch(int);
 static void setup_curses(void);
 static void teardown_curses(void);
 static void mainloop(const char **cmd, double interval);
@@ -320,7 +320,8 @@ struct state {
 };
 
 /* Signals handled through the pipe */
-static const int signals[] = {SIGCHLD, SIGWINCH};
+static std::pair<int, void (*)(int)> signals[] = {
+    {SIGCHLD, sighandler_sigchld}, {SIGWINCH, sighandler_sigwinch}};
 
 enum {
   OPT_HELP = 256,
@@ -453,7 +454,6 @@ static void mainloop(const char **cmd, double interval) {
       s->displayed = s->reading;
     /* File descriptors to monitor */
     int maxfd = -1;
-    set_fd(rfds, sigpipe[0], maxfd);
     set_fd(rfds, s->fd, maxfd);
     set_fd(rfds, 0, maxfd);
     /* Figure out maximum timeout */
@@ -467,14 +467,15 @@ static void mainloop(const char **cmd, double interval) {
     timeout.tv_nsec = floor(left_nsec * 1.0E9);
     /* Wait for someting to happen */
     if(pselect(maxfd + 1, &rfds, NULL, NULL, &timeout, &sigoldmask) < 0) {
-      if(errno == EINTR || errno == EAGAIN)
-        continue;
-      fatal(errno, "ppoll");
+      switch(errno) {
+      case EINTR:
+      case EAGAIN: break;
+      default: fatal(errno, "pselect");
+      }
     }
     /* Process events */
     s->render = 0;
-    if(FD_ISSET(sigpipe[0], &rfds))
-      process_signals(s);
+    process_signals(s);
     if(s->fd >= 0 && FD_ISSET(s->fd, &rfds)) {
       int sfd = s->fd;
       process_input(s);
@@ -761,8 +762,9 @@ static void pad_line(int y, int x, size_t n) {
                                 "                                              "
                                 "                                  "
                                 "                                  ";
+  static const size_t padding_max_chunk = (sizeof padding) - 1;
   while(n > 0) {
-    size_t this_time = n > strlen(padding) ? strlen(padding) : n;
+    size_t this_time = n > padding_max_chunk ? padding_max_chunk : n;
     if(mvinsnstr(y, x, padding, this_time) == ERR)
       fatal(0, "mvinsnstr failed (y=%d x=%d n=%zu)", y, x, this_time);
     x += this_time;
@@ -775,32 +777,18 @@ static void pad_line(int y, int x, size_t n) {
 /* Set up signal handling */
 static void setup_signals(void) {
   struct sigaction sa;
-  int n;
-  size_t i;
   sigset_t sighandled;
 
-  if(pipe(sigpipe) < 0)
-    fatal(errno, "pipe");
-  for(i = 0; i < 2; ++i) {
-    if((n = fcntl(sigpipe[i], F_GETFL)) < 0)
-      fatal(errno, "fcntl");
-    if(fcntl(sigpipe[i], F_SETFL, n | O_NONBLOCK) < 0)
-      fatal(errno, "fcntl");
-    if((n = fcntl(sigpipe[i], F_GETFD)) < 0)
-      fatal(errno, "fcntl");
-    if(fcntl(sigpipe[i], F_SETFD, n | FD_CLOEXEC) < 0)
-      fatal(errno, "fcntl");
-  }
-  sa.sa_handler = sighandler;
-  sa.sa_flags = 0;
+  memset(&sa, 0, sizeof sa);
   if(sigemptyset(&sa.sa_mask) < 0)
     fatal(errno, "sigemptyset");
   if(sigemptyset(&sighandled) < 0)
     fatal(errno, "sigemptyset");
-  for(i = 0; i < sizeof signals / sizeof *signals; ++i) {
-    if(sigaction(signals[i], &sa, NULL) < 0)
+  for(auto &s: signals) {
+    sa.sa_handler = s.second;
+    if(sigaction(s.first, &sa, NULL) < 0)
       fatal(errno, "sigaction");
-    if(sigaddset(&sighandled, signals[i]) < 0)
+    if(sigaddset(&sighandled, s.first) < 0)
       fatal(errno, "sigaddset");
   }
   if(sigprocmask(SIG_BLOCK, &sighandled, &sigoldmask) < 0)
@@ -809,10 +797,8 @@ static void setup_signals(void) {
 
 /* Reset signal configuration (used between fork and exec) */
 static void reset_signals(void) {
-  size_t i;
-
-  for(i = 0; i < sizeof signals / sizeof *signals; ++i) {
-    if(signal(signals[i], SIG_DFL) == SIG_ERR)
+  for(auto &s: signals) {
+    if(signal(s.first, SIG_DFL) == SIG_ERR)
       fatal(errno, "signal");
   }
   if(sigprocmask(SIG_SETMASK, &sigoldmask, 0) < 0)
@@ -821,47 +807,39 @@ static void reset_signals(void) {
 
 /* Process signals (in the event loop) */
 static void process_signals(struct state *s) {
-  unsigned char sig;
   struct winsize ws;
-  int n;
   pid_t pid;
-  while((n = read(sigpipe[0], &sig, 1)) > 0) {
-    switch(sig) {
-    case SIGCHLD:
-      while((pid = waitpid(-1, &n, WNOHANG)) > 0) {
-        if(pid == s->pid) {
-          s->status = n;
-          s->pid = -1;
-          s->render = 1;
-        }
+  int n;
+  if(sigchld) {
+    while((pid = waitpid(-1, &n, WNOHANG)) > 0) {
+      if(pid == s->pid) {
+        s->status = n;
+        s->pid = -1;
+        s->render = 1;
       }
-      break;
-    case SIGWINCH:
-      if(ioctl(0, TIOCGWINSZ, &ws) < 0)
-        fatal(errno, "ioctl TIOCGWINSZ");
-      resizeterm(ws.ws_row, ws.ws_col);
-      s->render = 1;
-      break;
-    default: fatal(0, "unexpected signal %d", sig);
     }
+    sigchld = 0;
   }
-  if(n < 0) {
-    if(errno == EINTR || errno == EAGAIN)
-      return;
-    fatal(errno, "read from sigpipe");
-  } else if(n == 0)
-    fatal(0, "unexpected EOF from sigpipe");
+  if(sigwinch) {
+    if(ioctl(0, TIOCGWINSZ, &ws) < 0)
+      fatal(errno, "ioctl TIOCGWINSZ");
+    resizeterm(ws.ws_row, ws.ws_col);
+    s->render = 1;
+    sigwinch = 0;
+  }
 }
 
 /* Quieten picky compilers */
 static void discard(int attribute((unused)) whatever) {}
 
-/* Handle a signal directly */
-static void sighandler(int sig) {
-  unsigned char sigc = sig;
-  int save_errno = errno;
-  discard(write(sigpipe[1], &sigc, 1));
-  errno = save_errno;
+/* Handle SIGCHLD */
+static void sighandler_sigchld(int) {
+  sigchld = 1;
+}
+
+/* Handle SIGWINCH */
+static void sighandler_sigwinch(int) {
+  sigwinch = 1;
 }
 
 /* Curses setup ------------------------------------------------------------ */
