@@ -258,9 +258,10 @@ struct file {
     return lines.size();
   }
 
+  static line dummy;
+
   /* Find a line. Returns a dummy empty line if you run off the end. */
   line &at(size_t index) {
-    static line dummy;
     if(index < lines.size())
       return lines.at(index);
     else
@@ -303,6 +304,8 @@ struct file {
     return time_monotonic() >= expires;
   }
 };
+
+line file::dummy;
 
 /* State of the event loop */
 struct state {
