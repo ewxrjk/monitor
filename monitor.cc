@@ -38,6 +38,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
+#include <algorithm>
 
 #define ESCBIT (KEY_MAX + 1)
 
@@ -700,8 +701,6 @@ static void render(struct state *s) {
       attron(A_REVERSE);
     else
       attroff(A_REVERSE);
-    // Prefill with blanks
-    pad_line(y, 0, width);
     if(line_numbers && s->yo + y < s->displayed->size()) {
       char line_number_buffer[128];
       snprintf(line_number_buffer, sizeof line_number_buffer, "%*zu ",
@@ -712,6 +711,7 @@ static void render(struct state *s) {
     }
     const std::vector<cchar_t> &cchars = cl.get_cchars();
     size_t pos = 0, limit = cchars.size(), column = 0;
+    int max_x = left_margin;
     while(pos < limit) {
       wchar_t wchars[CCHARW_MAX + 1];
       attr_t attrs;
@@ -726,12 +726,15 @@ static void render(struct state *s) {
         if(x < width) {
           if(mvadd_wch(y, x, &cchars[pos]) == ERR)
             fatal(0, "mvins_wch failed (y=%d x=%d)", y, x);
+          max_x = std::max(x + 1, max_x);
         } else
           break;
       }
       column += char_width;
       ++pos;
     }
+    // Blank out the rest
+    pad_line(y, max_x, width - max_x);
   }
   attron(A_REVERSE);
   time(&t);
