@@ -6,7 +6,11 @@ dist: xenial
 language: cpp
 addons:
   apt:
+    sources:
+    - ubuntu-toolchain-r-test
     packages:
+    - gcc-6
+    - g++-6
     - libncurses5-dev
 compiler:
 - clang
@@ -19,6 +23,6 @@ matrix:
 
 script:
 - ./autogen.sh
-- ./configure
+- scripts/travis/$TRAVIS_OS_NAME/$CC/configure
 - make
 - VERBOSE=true make check
