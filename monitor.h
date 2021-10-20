@@ -24,7 +24,7 @@
 #include <sys/time.h>
 
 extern int (*onfatal)(void);
-extern void (*terminate)(int) attribute((noreturn));
+extern bool forking;
 void fatal(int errno_value, const char *fmt, ...) attribute((noreturn));
 
 struct timespec time_monotonic();

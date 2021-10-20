@@ -538,7 +538,7 @@ static void invoke(struct state *s, const char **cmd) {
   switch(pid = fork()) {
   case 0:
     onfatal = NULL;
-    terminate = _exit;
+    forking = true;
     if(dup2(p[1], 2) < 0 || dup2(p[1], 1) < 0 || dup2(nullfd, 0) < 0)
       fatal(errno, "dup2");
     if(close(p[0]) < 0 || close(p[1]) < 0 || close(nullfd) < 0)

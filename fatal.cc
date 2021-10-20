@@ -22,12 +22,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 
 /* Called to clean up before reporting an fatal error */
 int (*onfatal)(void);
 
-/* Called to exit the process */
-void (*terminate)(int) attribute((noreturn)) = exit;
+/* Set inside a fork */
+bool forking;
 
 /* Report an error and terminate */
 void fatal(int errno_value, const char *fmt, ...) {
@@ -44,5 +45,8 @@ void fatal(int errno_value, const char *fmt, ...) {
     fprintf(stderr, ": %s\n", strerror(errno_value));
   else
     fprintf(stderr, "\n");
-  terminate(1);
+  if(forking)
+    _exit(1);
+  else
+    exit(1);
 }
