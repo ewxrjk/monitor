@@ -21,10 +21,10 @@ AC_CONFIG_AUX_DIR([config.aux])
 AM_INIT_AUTOMAKE([foreign])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 AC_CONFIG_SRCDIR([monitor.cc])
-AM_CONFIG_HEADER([config.h])
+AC_CONFIG_HEADERS([config.h])
 AC_LANG([C++])
 AC_PROG_CXX
-AC_SET_MAKE
+AC_PROG_MAKE_SET
 AC_CHECK_LIB([rt],[clock_gettime])
 AC_CHECK_FUNCS([clock_gettime])
 AC_CHECK_FUNC([iconv_option],[],[AC_CHECK_LIB([iconv],[iconv_open])])
