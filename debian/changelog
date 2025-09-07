@@ -1,3 +1,9 @@
+monitor (0.3+deb13u0) unstable; urgency=medium
+
+  * Rebuild for Debian trixie
+
+ -- Richard Kettlewell <rjk@terraraq.uk>  Sun, 07 Sep 2025 10:45:48 +0100
+
 monitor (0.3) stable; urgency=medium
 
   * Avoid unnecessary padding
